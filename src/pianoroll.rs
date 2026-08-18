@@ -28,6 +28,14 @@ pub enum Edge {
     Right,
 }
 
+/// Which sub-region of a note a response belongs to (for hit-testing drags).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum NoteZone {
+    Left,
+    Body,
+    Right,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Scheme {
     ByPitchClass,
@@ -593,14 +601,28 @@ pub fn show(
     }
 
     // ---- per-note responses ----
-    let edge_zone = |r: &Rect| EDGE_PX.min(r.width() * 0.30);
-    let mut note_resps: Vec<(u64, Rect, Response)> = Vec::new();
+    // Each note gets THREE separate interact regions (a left edge, the body, and a
+    // right edge), so drags are cleanly split: edges resize, the body moves.
+    let zone_w = EDGE_PX;
+    let mut zones: Vec<(u64, NoteZone, Rect, Response)> = Vec::new();
     for (id, r) in &note_rects {
-        let resp = ui.interact(*r, egui::Id::new(("pr_note", *id)), Sense::click_and_drag());
-        note_resps.push((*id, *r, resp));
+        let left = Rect::from_min_max(r.min, Pos2::new(r.left() + zone_w, r.bottom()));
+        let left_resp = ui.interact(left, egui::Id::new(("pr_note_l", *id)), Sense::click_and_drag());
+        zones.push((*id, NoteZone::Left, left, left_resp));
+        if r.width() > zone_w * 2.0 {
+            let body = Rect::from_min_max(
+                Pos2::new(r.left() + zone_w, r.top()),
+                Pos2::new(r.right() - zone_w, r.bottom()),
+            );
+            let body_resp = ui.interact(body, egui::Id::new(("pr_note_b", *id)), Sense::click_and_drag());
+            zones.push((*id, NoteZone::Body, body, body_resp));
+        }
+        let right = Rect::from_min_max(Pos2::new(r.right() - zone_w, r.top()), r.max);
+        let right_resp = ui.interact(right, egui::Id::new(("pr_note_r", *id)), Sense::click_and_drag());
+        zones.push((*id, NoteZone::Right, right, right_resp));
     }
 
-    for (nid, r, resp) in &note_resps {
+    for (nid, zone, _zr, resp) in &zones {
         // click: select / shift-click duplicate or add-to-selection
         if resp.clicked()
             && let Some(n) = pat.notes.iter().find(|x| x.id == *nid).cloned()
@@ -637,14 +659,10 @@ pub fn show(
             }
         }
 
-        // drag start: decide move vs resize
+        // drag start: the zone decides move vs resize (edges resize, body moves)
         if resp.drag_started()
-            && let Some(p0) = resp.interact_pointer_pos()
+            && let Some(_p0) = resp.interact_pointer_pos()
         {
-            let ez = edge_zone(r);
-            let dl = (p0.x - r.left()).abs();
-            let dr = (r.right() - p0.x).abs();
-
             let was_selected = state.selection.contains(nid);
             let mut sel = state.selection.clone();
             if !was_selected && !shift {
@@ -654,23 +672,27 @@ pub fn show(
                 sel.insert(*nid);
             }
             let group_ids: Vec<u64> = sel.iter().cloned().collect();
-            let hit_note = pat.notes.iter().find(|x| x.id == *nid).cloned();
             state.begin_edit(pat);
             state.selection = sel;
 
-            let edge = if dl <= ez { Some(Edge::Left) } else if dr <= ez { Some(Edge::Right) } else { None };
-            if let Some(edge) = edge {
-                let orig: Vec<(usize, usize)> = group_ids
-                    .iter()
-                    .map(|iid| pat.notes.iter().find(|n| n.id == *iid).map(|n| (n.start_step, n.length_steps)).unwrap_or((0, 1)))
-                    .collect();
-                state.drag = Some(Drag::NoteResize { ids: group_ids, orig, edge, hit_id: *nid });
-            } else if let Some(n) = hit_note {
-                let orig: Vec<(i32, usize)> = group_ids
-                    .iter()
-                    .map(|iid| pat.notes.iter().find(|x| x.id == *iid).map(|n| (n.pitch_index, n.start_step)).unwrap_or((0, 0)))
-                    .collect();
-                state.drag = Some(Drag::NoteMove { ids: group_ids, hit_id: n.id, last_pitch: Some(n.pitch_index), orig });
+            match zone {
+                NoteZone::Left | NoteZone::Right => {
+                    let edge = if *zone == NoteZone::Left { Edge::Left } else { Edge::Right };
+                    let orig: Vec<(usize, usize)> = group_ids
+                        .iter()
+                        .map(|iid| pat.notes.iter().find(|n| n.id == *iid).map(|n| (n.start_step, n.length_steps)).unwrap_or((0, 1)))
+                        .collect();
+                    state.drag = Some(Drag::NoteResize { ids: group_ids, orig, edge, hit_id: *nid });
+                }
+                NoteZone::Body => {
+                    if let Some(n) = pat.notes.iter().find(|x| x.id == *nid).cloned() {
+                        let orig: Vec<(i32, usize)> = group_ids
+                            .iter()
+                            .map(|iid| pat.notes.iter().find(|x| x.id == *iid).map(|n| (n.pitch_index, n.start_step)).unwrap_or((0, 0)))
+                            .collect();
+                        state.drag = Some(Drag::NoteMove { ids: group_ids, hit_id: n.id, last_pitch: Some(n.pitch_index), orig });
+                    }
+                }
             }
         }
 
@@ -736,19 +758,16 @@ pub fn show(
         }
     }
 
-    // ---- cursor feedback ----
+    // ---- cursor feedback (per zone) ----
     if let Some(pos) = hover
-        && in_grid(pos) {
-            let near_edge = note_rects.iter().any(|(_, r)| {
-                let ez = edge_zone(r);
-                (pos.x - r.left()).abs() <= ez || (r.right() - pos.x).abs() <= ez
-            });
-            if near_edge {
-                ui.ctx().output_mut(|o| o.cursor_icon = egui::CursorIcon::ResizeHorizontal);
-            } else if note_rects.iter().any(|(_, r)| r.contains(pos)) {
-                ui.ctx().output_mut(|o| o.cursor_icon = egui::CursorIcon::Grab);
+        && in_grid(pos)
+            && let Some((_, z, _zr, _)) = zones.iter().find(|(_, _, zr, _)| zr.contains(pos)) {
+                let icon = match z {
+                    NoteZone::Left | NoteZone::Right => egui::CursorIcon::ResizeHorizontal,
+                    NoteZone::Body => egui::CursorIcon::Grab,
+                };
+                ui.ctx().output_mut(move |o| o.cursor_icon = icon);
             }
-        }
 
     let _ = bg;
 }
