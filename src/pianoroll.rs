@@ -210,6 +210,23 @@ fn auto_note_name(pitch: i32, spo: i32, names_spec: &str) -> String {
     format!("{base}{octave}")
 }
 
+/// Horizontal zoom keeping the pitch under `mx` fixed; returns (factor-applied
+/// step width, new left-edge step).
+fn zoom_at(
+    view_left: f32,
+    step_px: f32,
+    mx: f32,
+    ui_left: f32,
+    scroll_y: f32,
+    total: f32,
+) -> (f32, f32) {
+    let cur_step = (view_left + (mx - ui_left) / step_px).clamp(0.0, total);
+    let factor = (scroll_y * 0.01).exp();
+    let new_sp = (step_px * factor).clamp(6.0, 64.0);
+    let new_left = (cur_step - (mx - ui_left) / new_sp).clamp(-1.0, total);
+    (new_sp, new_left)
+}
+
 fn snap_to(v: i32, snap: usize) -> i32 {
     if snap < 1 {
         return v;
@@ -246,22 +263,25 @@ pub fn show(
     let shift = ui.input(|i| i.modifiers.shift);
     let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
 
-    // The ruler is split: its top strip pans horizontally (like shift+wheel),
-    // the strip below it zooms horizontally around the cursor, and over the
-    // grid the wheel scrolls vertically.
+    // Wheel, in priority order:
+    //  - shift (or ctrl+shift, where ctrl is ignored) -> pan horizontally
+    //  - ctrl alone -> zoom around the cursor (anywhere)
+    //  - ruler top strip -> pan; lower ruler -> zoom; grid -> vertical scroll
     let ruler_pan_bottom = origin.y + RULER_PAN_H;
     if let Some(hp) = hover
         && scrolled != Vec2::ZERO {
-            if shift || hp.y < ruler_pan_bottom {
-                state.view_left += (- scrolled.x - scrolled.y) * 0.1;
+            if shift {
+                state.view_left += (- scrolled.x - scrolled.y) * 0.25;
+            } else if ctrl {
+                let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32);
+                state.step_px = sp;
+                state.view_left = vl;
+            } else if hp.y < ruler_pan_bottom {
+                state.view_left += (- scrolled.x - scrolled.y) * 0.25;
             } else if hp.y < ui_top {
-                let mx = hp.x;
-                let cur_step = (state.view_left + (mx - ui_left) / state.step_px)
-                    .clamp(0.0, total_steps as f32);
-                let factor = (scrolled.y * 0.01).exp();
-                let new_sp = (state.step_px * factor).clamp(6.0, 64.0);
-                state.step_px = new_sp;
-                state.view_left = (cur_step - (mx - ui_left) / new_sp).clamp(-1.0, total_steps as f32);
+                let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32);
+                state.step_px = sp;
+                state.view_left = vl;
             } else {
                 state.view_top = (state.view_top + scrolled.y * 0.15).clamp(SCROLL_MIN, SCROLL_MAX);
             }
