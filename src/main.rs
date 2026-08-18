@@ -172,6 +172,7 @@ impl eframe::App for PianoRollApp {
                         p.note_names = self.editor.names.clone();
                         p.scheme = self.editor.scheme;
                         p.snap = self.editor.snap;
+                        p.tonic = self.editor.tonic;
                         p.clips = self.editor.clips.clone();
                         p.clip_names = self.editor.clip_names.clone();
                         p.active_clip = self.editor.active_clip;
@@ -214,6 +215,7 @@ impl eframe::App for PianoRollApp {
                                     self.editor.names = p.note_names;
                                     self.editor.scheme = p.scheme;
                                     self.editor.snap = p.snap;
+                                    self.editor.tonic = p.tonic;
                                     self.editor.selection.clear();
                                     self.editor.begin_edit(&mut pat);
                                 }
@@ -351,6 +353,19 @@ impl eframe::App for PianoRollApp {
                     });
                 }
 
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Root:");
+                    let spo = (self.engine.lock().unwrap().tuning_kind().steps_per_octave() as i32).max(1);
+                    let mut root = self.editor.tonic;
+                    if ui
+                        .add(egui::DragValue::new(&mut root).range(0..=spo - 1).speed(1))
+                        .changed()
+                    {
+                        self.editor.tonic = root;
+                    }
+                    ui.label("(tonic pitch class)");
+                });
                 ui.separator();
                 ui.label("Note names:");
                 let mut nnames = self.editor.names.clone();

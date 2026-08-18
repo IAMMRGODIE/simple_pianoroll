@@ -26,6 +26,7 @@ pub struct Project {
     pub timbre: Timbre,
     pub effects: Vec<EffectState>,
     pub note_names: String,
+    pub tonic: i32,
     pub scheme: Scheme,
     pub snap: usize,
     pub clips: Vec<Pattern>,

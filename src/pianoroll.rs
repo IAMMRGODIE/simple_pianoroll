@@ -89,6 +89,8 @@ pub struct EditorState {
     pub view_left: f32,
     pub view_top: f32,
     pub scheme: Scheme,
+    /// Tonic / root pitch class (0..steps_per_octave).
+    pub tonic: i32,
     /// User-editable palette for the Custom color scheme (RGB per degree).
     pub custom_colors: Vec<[u8; 3]>,
     pub snap: usize,
@@ -115,6 +117,7 @@ impl Default for EditorState {
             view_left: 0.0,
             view_top: 60.0,
             scheme: Scheme::ByPitchClass,
+            tonic: 0,
             custom_colors: rainbow_palette(12),
             snap: 1,
             names: "C C# D D# E F F# G G# A A# B".to_string(),
@@ -231,7 +234,7 @@ pub fn rainbow_palette(n: usize) -> Vec<[u8; 3]> {
         .collect()
 }
 
-fn note_color(pitch: i32, spo: i32, scheme: Scheme, custom: &[[u8; 3]]) -> Color32 {
+fn note_color(pitch: i32, tonic: i32, spo: i32, scheme: Scheme, custom: &[[u8; 3]]) -> Color32 {
     match scheme {
         Scheme::Custom => {
             if custom.is_empty() {
@@ -248,7 +251,7 @@ fn note_color(pitch: i32, spo: i32, scheme: Scheme, custom: &[[u8; 3]]) -> Color
             Color32::from(egui::ecolor::Hsva::new(h, 0.6, 0.75, 1.0))
         }
         Scheme::ByPitchClass => {
-            let d = pitch.rem_euclid(spo.max(1)) as f32 / spo.max(1) as f32;
+            let d = (pitch - tonic).rem_euclid(spo.max(1)) as f32 / spo.max(1) as f32;
             Color32::from(egui::ecolor::Hsva::new(d, 0.65, 0.75, 1.0))
         }
     }
@@ -401,7 +404,7 @@ pub fn show(
         if y > grid_bottom || y + ROW_H < ui_top {
             continue;
         }
-        let row_color = if p.rem_euclid(spo) == 0 {
+        let row_color = if (p - state.tonic).rem_euclid(spo) == 0 {
             Color32::from_rgb(38, 40, 50)
         } else if p.rem_euclid(2) == 0 {
             Color32::from_rgb(30, 31, 36)
@@ -479,7 +482,7 @@ pub fn show(
             Align2::RIGHT_CENTER,
             label,
             egui::FontId::proportional(9.0),
-            if p.rem_euclid(spo) == 0 { Color32::WHITE } else { Color32::from_rgb(150, 150, 160) },
+            if (p - state.tonic).rem_euclid(spo) == 0 { Color32::WHITE } else { Color32::from_rgb(150, 150, 160) },
         );
     }
 
@@ -498,7 +501,7 @@ pub fn show(
         if r.right() < ui_left || r.left() > ui_left + width - KEY_W {
             continue;
         }
-        painter.rect_filled(*r, 3.0, note_color(n.pitch_index, spo, state.scheme, &state.custom_colors));
+        painter.rect_filled(*r, 3.0, note_color(n.pitch_index, state.tonic, spo, state.scheme, &state.custom_colors));
         painter.rect_stroke(
             *r,
             3.0,
@@ -543,7 +546,7 @@ pub fn show(
             Pos2::new(x_of(s0 as f32), y_of(*pitch as f32) + 1.0),
             Vec2::new((s1 - s0 + 1) as f32 * step_px - 1.0, ROW_H - 2.0),
         );
-        painter.rect_filled(preview_rect, 3.0, note_color(*pitch, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
+        painter.rect_filled(preview_rect, 3.0, note_color(*pitch, state.tonic, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
     }
 
     // ===================== interaction =====================

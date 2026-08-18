@@ -543,6 +543,7 @@ impl Engine {
                 .map(|e| crate::project::EffectState { on: e.on, mix: e.mix })
                 .collect(),
             note_names: String::new(),
+            tonic: 0,
             scheme: crate::pianoroll::Scheme::ByPitchClass,
             snap: 1,
             clips: Vec::new(),
