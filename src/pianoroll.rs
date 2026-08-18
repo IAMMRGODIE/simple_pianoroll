@@ -233,18 +233,12 @@ pub fn show(
 
     if let Some(hp) = hover
         && scrolled != Vec2::ZERO {
-            if shift {
-                state.view_left -= (scrolled.x - scrolled.y) * 0.1;
-            } else if hp.y < ui_top {
-                let mx = hp.x;
-                let cur_step = (state.view_left + (mx - ui_left) / state.step_px)
-                    .clamp(0.0, total_steps as f32);
-                let factor = (scrolled.y * 0.01).exp();
-                let new_sp = (state.step_px * factor).clamp(6.0, 64.0);
-                state.step_px = new_sp;
-                state.view_left = (cur_step - (mx - ui_left) / new_sp).clamp(-1.0, total_steps as f32);
+            // Scrolling over the ruler (above the bar lines) — or shift+wheel —
+            // pans the view horizontally; over the grid it scrolls vertically.
+            if shift || hp.y < ui_top {
+                state.view_left += (scrolled.x - scrolled.y) * 0.25;
             } else {
-                state.view_top = (state.view_top + scrolled.y * 0.2).clamp(SCROLL_MIN, SCROLL_MAX);
+                state.view_top = (state.view_top + scrolled.y * 0.35).clamp(SCROLL_MIN, SCROLL_MAX);
             }
             state.view_left = state.view_left.clamp(-2.0, total_steps as f32);
         }
