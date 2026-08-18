@@ -389,6 +389,9 @@ impl Engine {
 
     /// Play a short preview tone for `pitch_index` (re-triggers on pitch change).
     pub fn preview_note(&mut self, pitch_index: i32) {
+        if self.playing {
+            return; // no preview sound while the transport is playing
+        }
         let note = (REF_NOTE + pitch_index).max(0) as usize;
         if self.preview.len() >= 24 {
             return; // don't let a busy drag pile up previews
