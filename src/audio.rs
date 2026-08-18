@@ -15,6 +15,9 @@ use i_am_dsp::prelude::*;
 use crate::pattern::{self, Pattern};
 use crate::tuning::{TuningKind, TuningWrapper, REF_NOTE};
 
+/// Length of the metronome tick (seconds).
+const CLICK_LEN: f32 = 0.03;
+
 /// A per-sample `ProcessContext` that hands the scheduled events to `Adsr`.
 struct SeqContext {
     info: ProcessInfos,
@@ -105,6 +108,12 @@ pub struct Engine {
     events_buf: Vec<NoteEvent>,
     timbre: Timbre,
     effects: Vec<EffectSlot>,
+    metronome: bool,
+    metronome_volume: f32,
+    last_step: usize,
+    click_t: f32,
+    click_freq: f32,
+    click_gain: f32,
 }
 
 /// Builder for a single generated waveform (used when no sample is loaded).
@@ -205,6 +214,12 @@ impl Engine {
             effects,
             using_sample: false,
             sample_path: None,
+            metronome: false,
+            metronome_volume: 0.5,
+            last_step: 0,
+            click_t: CLICK_LEN,
+            click_freq: 1000.0,
+            click_gain: 0.0,
         }
     }
 
@@ -296,10 +311,45 @@ impl Engine {
             }
         }
 
+        // metronome: tick on each beat (stronger+higher on the bar downbeat)
+        if self.playing && self.metronome {
+            let step = pattern::step_at(self.sample_counter, self.sample_rate, self.tempo);
+            if step != self.last_step && step.is_multiple_of(pattern::STEPS_PER_BEAT) {
+                let bar = step.is_multiple_of(pattern::BAR_STEPS);
+                self.click_t = 0.0;
+                self.click_freq = if bar { 2000.0 } else { 1000.0 };
+                self.click_gain = self.metronome_volume * if bar { 1.0 } else { 0.5 };
+            }
+            self.last_step = step;
+            if self.click_t < CLICK_LEN {
+                let n = self.click_t;
+                let env = (1.0 - n / CLICK_LEN).powi(2);
+                let tone =
+                    (std::f32::consts::TAU * self.click_freq * n).sin() * env * self.click_gain;
+                out[0] += tone;
+                out[1] += tone;
+                self.click_t += 1.0 / self.sample_rate as f32;
+            }
+        }
+
         if self.playing {
             self.sample_counter = (self.sample_counter + 1) % self.loop_samples;
         }
         out
+    }
+
+    // ---- metronome ----
+    pub fn metronome(&self) -> bool {
+        self.metronome
+    }
+    pub fn set_metronome(&mut self, on: bool) {
+        self.metronome = on;
+    }
+    pub fn metronome_volume(&self) -> f32 {
+        self.metronome_volume
+    }
+    pub fn set_metronome_volume(&mut self, v: f32) {
+        self.metronome_volume = v.clamp(0.0, 1.0);
     }
 
     // ---- timbre ----

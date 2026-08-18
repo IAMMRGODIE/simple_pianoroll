@@ -137,6 +137,16 @@ impl eframe::App for PianoRollApp {
                 }
 
                 ui.separator();
+                let mut met = self.engine.lock().unwrap().metronome();
+                if ui.checkbox(&mut met, "Metronome").changed() {
+                    self.engine.lock().unwrap().set_metronome(met);
+                }
+                let mut mvol = self.engine.lock().unwrap().metronome_volume();
+                if ui.add(egui::Slider::new(&mut mvol, 0.0..=1.0).text("Met vol")).changed() {
+                    self.engine.lock().unwrap().set_metronome_volume(mvol);
+                }
+
+                ui.separator();
                 if ui.button("Clear").clicked() {
                     self.editor.begin_edit(&mut pat);
                     pat.notes.clear();
