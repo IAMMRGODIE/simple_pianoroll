@@ -18,7 +18,7 @@ pub const DEFAULT_TEMPO: f32 = 120.0;
 
 /// A note in the pattern. `pitch_index` is our uniform EDO degree
 /// (0 == reference C4); times are in grid *steps*.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Note {
     /// Stable identity, used by the editor for selections.
     pub id: u64,
@@ -26,6 +26,8 @@ pub struct Note {
     pub start_step: usize,
     pub length_steps: usize,
     pub velocity: f32,
+    /// Optional user label; empty means "show the auto note name".
+    pub label: String,
 }
 
 /// The editable loop: a list of notes plus its total length in steps.
@@ -50,6 +52,7 @@ impl Pattern {
                 start_step: i * STEPS_PER_BEAT,
                 length_steps: STEPS_PER_BEAT,
                 velocity: 0.8,
+                label: String::new(),
             });
         }
         p
@@ -86,7 +89,26 @@ impl Pattern {
             start_step,
             length_steps: length_steps.max(1),
             velocity,
+            label: String::new(),
         });
+        id
+    }
+
+    /// Set the custom label of the note with the given id.
+    pub fn set_label(&mut self, id: u64, label: String) {
+        if let Some(n) = self.notes.iter_mut().find(|n| n.id == id) {
+            n.label = label;
+        }
+    }
+
+    /// Add a copy of `src` (keeping its label) at a new position, returning the new id.
+    pub fn duplicate(&mut self, src: &Note, start_step: usize, length_steps: usize) -> u64 {
+        let id = self.take_id();
+        let mut clone = src.clone();
+        clone.id = id;
+        clone.start_step = start_step;
+        clone.length_steps = length_steps.max(1);
+        self.notes.push(clone);
         id
     }
 

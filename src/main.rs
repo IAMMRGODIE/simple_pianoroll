@@ -174,6 +174,54 @@ impl eframe::App for PianoRollApp {
                             }
                         }
                     });
+
+                ui.separator();
+                ui.label("Note names:");
+                let mut nnames = self.editor.names.clone();
+                let nres = ui.add(
+                    egui::TextEdit::singleline(&mut nnames)
+                        .hint_text("C C# D D# E F F# G G# A A# B ...")
+                        .desired_width(190.0),
+                );
+                if nres.changed() {
+                    self.editor.names = nnames;
+                }
+                if ui.button("Reset").clicked() {
+                    self.editor.names = "C C# D D# E F F# G G# A A# B".to_string();
+                }
+
+                if !self.editor.selection.is_empty() {
+                    ui.separator();
+                    ui.label("Note label:");
+                    let some_id = *self.editor.selection.iter().next().unwrap();
+                    let mut note_label = pat
+                        .notes
+                        .iter()
+                        .find(|n| n.id == some_id)
+                        .map(|n| n.label.clone())
+                        .unwrap_or_default();
+                    let lres = ui.add(
+                        egui::TextEdit::singleline(&mut note_label)
+                            .hint_text("custom label (overrides name)")
+                            .desired_width(150.0),
+                    );
+                    if lres.gained_focus() {
+                        self.editor.begin_edit(&mut pat);
+                    }
+                    if lres.changed() {
+                        let sel = self.editor.selection.clone();
+                        for id in sel {
+                            pat.set_label(id, note_label.clone());
+                        }
+                    }
+                    if ui.button("Clear label").clicked() {
+                        self.editor.begin_edit(&mut pat);
+                        let sel = self.editor.selection.clone();
+                        for id in sel {
+                            pat.set_label(id, String::new());
+                        }
+                    }
+                }
             });
         });
 

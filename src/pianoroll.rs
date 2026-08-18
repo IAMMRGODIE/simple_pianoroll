@@ -79,6 +79,8 @@ pub struct EditorState {
     pub view_top: f32,
     pub scheme: Scheme,
     pub snap: usize,
+    /// User-configurable base note names (space/comma separated), fed to the auto-namer.
+    pub names: String,
     pub clipboard: Vec<Note>,
     erasing: bool,
     history: Vec<Pattern>,
@@ -96,6 +98,7 @@ impl Default for EditorState {
             view_top: 60.0,
             scheme: Scheme::ByPitchClass,
             snap: 1,
+            names: "C C# D D# E F F# G G# A A# B".to_string(),
             clipboard: Vec::new(),
             erasing: false,
             history: Vec::new(),
@@ -149,7 +152,7 @@ impl EditorState {
         let mut new_sel = HashSet::new();
         for n in &clip {
             let ns = (n.start_step as i64 + off).clamp(0, (total - 1).max(0)) as usize;
-            let id = pat.add_note(n.pitch_index, ns, n.length_steps, n.velocity);
+            let id = pat.duplicate(n, ns, n.length_steps);
             new_sel.insert(id);
         }
         self.selection = new_sel;
@@ -166,7 +169,7 @@ impl EditorState {
         let mut new_sel = HashSet::new();
         for n in &selected {
             let ns = (n.start_step + n.length_steps).min(total.saturating_sub(1));
-            let id = pat.add_note(n.pitch_index, ns, n.length_steps, n.velocity);
+            let id = pat.duplicate(n, ns, n.length_steps);
             new_sel.insert(id);
         }
         self.selection = new_sel;
@@ -188,13 +191,23 @@ fn note_color(pitch: i32, spo: i32, scheme: Scheme) -> Color32 {
     }
 }
 
-fn note_name_twelve(pitch: i32) -> String {
-    const NAMES: [&str; 12] = [
-        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-    ];
-    let cls = pitch.rem_euclid(12) as usize;
-    let octave = 4 + pitch.div_euclid(12);
-    format!("{}{}", NAMES[cls], octave)
+/// Build the auto note name for a pitch: a user-configurable base spelling
+/// (per degree within the octave) plus the current octave. Degrees without a
+/// configured name fall back to plain degree numbers, so unfamiliar EDOs stay
+/// readable and users who know another notation can supply their own names.
+fn auto_note_name(pitch: i32, spo: i32, names_spec: &str) -> String {
+    let names: Vec<String> = names_spec
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    let deg = pitch.rem_euclid(spo) as usize;
+    let octave = 4 + pitch.div_euclid(spo);
+    let base = match names.get(deg) {
+        Some(name) => name.clone(),
+        None => deg.to_string(),
+    };
+    format!("{base}{octave}")
 }
 
 fn snap_to(v: i32, snap: usize) -> i32 {
@@ -240,7 +253,7 @@ pub fn show(
     if let Some(hp) = hover
         && scrolled != Vec2::ZERO {
             if shift || hp.y < ruler_pan_bottom {
-                state.view_left += (- scrolled.x - scrolled.y) * 0.25;
+                state.view_left += (- scrolled.x - scrolled.y) * 0.1;
             } else if hp.y < ui_top {
                 let mx = hp.x;
                 let cur_step = (state.view_left + (mx - ui_left) / state.step_px)
@@ -336,7 +349,7 @@ pub fn show(
         if y > grid_bottom || y + ROW_H < ui_top {
             continue;
         }
-        let label = if spo == 12 { note_name_twelve(p) } else { format!("{}", p.rem_euclid(spo)) };
+        let label = auto_note_name(p, spo, &state.names);
         painter.text(
             Pos2::new(ui_left - 4.0, y + ROW_H * 0.5),
             Align2::RIGHT_CENTER,
@@ -368,6 +381,21 @@ pub fn show(
             Stroke::new(1.0, if state.selection.contains(&n.id) { Color32::WHITE } else { Color32::from_rgb(20, 20, 20) }),
             egui::StrokeKind::Outside,
         );
+        // note label: custom label, or the auto note name when wide enough
+        if r.width() > 17.0 {
+            let text = if n.label.is_empty() {
+                auto_note_name(n.pitch_index, spo, &state.names)
+            } else {
+                n.label.clone()
+            };
+            painter.text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                text,
+                egui::FontId::proportional(9.0),
+                Color32::from_rgb(20, 20, 20),
+            );
+        }
     }
 
     // ---- playhead ----
@@ -512,7 +540,7 @@ pub fn show(
     for (nid, r, resp) in &note_resps {
         // click: select / shift-click duplicate or add-to-selection
         if resp.clicked()
-            && let Some(n) = pat.notes.iter().find(|x| x.id == *nid).copied()
+            && let Some(n) = pat.notes.iter().find(|x| x.id == *nid).cloned()
         {
             if shift {
                 if state.selection.contains(&n.id) {
@@ -522,11 +550,11 @@ pub fn show(
                         .notes
                         .iter()
                         .filter(|x| state.selection.contains(&x.id))
-                        .copied()
+                        .cloned()
                         .collect();
                     let mut new_sel = HashSet::new();
                     for x in &selected {
-                        let id = pat.add_note(x.pitch_index, x.start_step, x.length_steps, x.velocity);
+                        let id = pat.duplicate(x, x.start_step, x.length_steps);
                         new_sel.insert(id);
                     }
                     state.selection = new_sel;
@@ -563,7 +591,7 @@ pub fn show(
                 sel.insert(*nid);
             }
             let group_ids: Vec<u64> = sel.iter().cloned().collect();
-            let hit_note = pat.notes.iter().find(|x| x.id == *nid).copied();
+            let hit_note = pat.notes.iter().find(|x| x.id == *nid).cloned();
             state.begin_edit(pat);
             state.selection = sel;
 
