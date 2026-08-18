@@ -258,26 +258,43 @@ pub fn show(
     let rows_visible = ((height - TOP_H) / ROW_H).ceil().max(0.0) as i32;
 
     // ---- input: modifiers & wheel ----
-    let scrolled = ui.input(|i| i.smooth_scroll_delta);
+    // Read the raw wheel event(s): egui converts ctrl (and ctrl+shift) wheel
+    // into Event::Zoom and zeroes smooth_scroll_delta, so we read the raw delta
+    // plus the wheel event's own modifiers and decide pan/zoom/scroll ourselves.
+    let wheel = ui.input(|i| {
+        let mut d = Vec2::ZERO;
+        let mut wc = false;
+        let mut ws = false;
+        for e in &i.events {
+            if let egui::Event::MouseWheel { delta, modifiers, .. } = e {
+                d = *delta;
+                wc = modifiers.command || modifiers.ctrl;
+                ws = modifiers.shift;
+            }
+        }
+        (d, wc, ws)
+    });
+    let (scrolled, wheel_ctrl, wheel_shift) = wheel;
+
     let hover = ui.input(|i| i.pointer.hover_pos());
     let shift = ui.input(|i| i.modifiers.shift);
     let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
 
     // Wheel, in priority order:
-    //  - shift (or ctrl+shift, where ctrl is ignored) -> pan horizontally
-    //  - ctrl alone -> zoom around the cursor (anywhere)
+    //  - shift (on the wheel) -> pan horizontally (ctrl is ignored when shift is held)
+    //  - ctrl (on the wheel)  -> zoom around the cursor (anywhere)
     //  - ruler top strip -> pan; lower ruler -> zoom; grid -> vertical scroll
     let ruler_pan_bottom = origin.y + RULER_PAN_H;
     if let Some(hp) = hover
         && scrolled != Vec2::ZERO {
-            if shift {
-                state.view_left += (- scrolled.x - scrolled.y) * 0.25;
-            } else if ctrl {
+            if wheel_shift {
+                state.view_left += (- scrolled.x - scrolled.y) * 0.10;
+            } else if wheel_ctrl {
                 let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32);
                 state.step_px = sp;
                 state.view_left = vl;
             } else if hp.y < ruler_pan_bottom {
-                state.view_left += (- scrolled.x - scrolled.y) * 0.25;
+                state.view_left += (- scrolled.x - scrolled.y) * 0.10;
             } else if hp.y < ui_top {
                 let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32);
                 state.step_px = sp;
