@@ -26,6 +26,7 @@ struct PianoRollApp {
     editor: EditorState,
     custom_ratios_input: Vec<f32>,
     show_custom_window: bool,
+    show_colors_window: bool,
 }
 
 impl eframe::App for PianoRollApp {
@@ -348,19 +349,8 @@ impl eframe::App for PianoRollApp {
                             }
                         }
                     });
-                if self.editor.scheme == pianoroll::Scheme::Custom {
-                    // per-degree color editors (capped so the panel stays sane)
-                    let spo = self.engine.lock().unwrap().tuning_steps();
-                    let cap = (spo.min(24)) as usize;
-                    while self.editor.custom_colors.len() < cap {
-                        self.editor.custom_colors.push([140, 140, 140]);
-                    }
-                    self.editor.custom_colors.truncate(cap);
-                    ui.horizontal_wrapped(|ui| {
-                        for i in 0..cap {
-                            ui.color_edit_button_srgb(&mut self.editor.custom_colors[i]);
-                        }
-                    });
+                if ui.button("Colors…").clicked() {
+                    self.show_colors_window = true;
                 }
 
                 ui.separator();
@@ -572,6 +562,35 @@ impl eframe::App for PianoRollApp {
             }
         }
 
+        // ---- per-degree note colors (separate window) ----
+        if self.show_colors_window {
+            let mut open = true;
+            egui::Window::new("Note colors — one swatch per pitch class (used by the Custom scheme)")
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    let spo = self.engine.lock().unwrap().tuning_steps();
+                    let cap = (spo.min(24)) as usize;
+                    while self.editor.custom_colors.len() < cap {
+                        self.editor.custom_colors.push([140, 140, 140]);
+                    }
+                    self.editor.custom_colors.truncate(cap);
+                    ui.label(format!("{cap} pitch classes (select Custom in Color to apply)"));
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        for i in 0..cap {
+                            ui.color_edit_button_srgb(&mut self.editor.custom_colors[i]);
+                        }
+                    });
+                    ui.add_space(6.0);
+                    if ui.button("Close").clicked() {
+                        self.show_colors_window = false;
+                    }
+                });
+            if !open {
+                self.show_colors_window = false;
+            }
+        }
+
         // ---- write the edited pattern back + apply preview/seek (brief lock) ----
         {
             let mut e = self.engine.lock().unwrap();
@@ -611,6 +630,7 @@ fn main() -> eframe::Result<()> {
                 editor,
                 custom_ratios_input: vec![1.0, 9.0 / 8.0, 5.0 / 4.0, 3.0 / 2.0],
                 show_custom_window: false,
+                show_colors_window: false,
             }))
         }),
     )
