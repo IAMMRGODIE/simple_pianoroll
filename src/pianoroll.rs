@@ -236,7 +236,7 @@ pub fn show(
             // Scrolling over the ruler (above the bar lines) — or shift+wheel —
             // pans the view horizontally; over the grid it scrolls vertically.
             if shift || hp.y < ui_top {
-                state.view_left -= (scrolled.x - scrolled.y) * 0.1;
+                state.view_left += (- scrolled.x - scrolled.y) * 0.1;
             } else {
                 state.view_top = (state.view_top + scrolled.y * 0.15).clamp(SCROLL_MIN, SCROLL_MAX);
             }
