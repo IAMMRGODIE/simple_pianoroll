@@ -72,7 +72,7 @@ impl Default for Timbre {
     fn default() -> Self {
         Self {
             waveform: Waveform::Sine,
-            attack: 10.0,
+            attack: 2.0, // crisper onset so notes line up with the metronome
             hold: 100.0,
             decay: 100.0,
             sustain: 1.0,
@@ -216,7 +216,7 @@ impl Engine {
             sample_path: None,
             metronome: false,
             metronome_volume: 0.5,
-            last_step: 0,
+            last_step: usize::MAX, // ensure the first beat ticks too
             click_t: CLICK_LEN,
             click_freq: 1000.0,
             click_gain: 0.0,
