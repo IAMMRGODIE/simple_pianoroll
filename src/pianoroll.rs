@@ -14,6 +14,8 @@ use crate::pattern::{BAR_STEPS, Note, Pattern};
 
 const KEY_W: f32 = 58.0;
 const TOP_H: f32 = 26.0;
+/// Top strip of the ruler: wheel here pans horizontally; below it zooms.
+const RULER_PAN_H: f32 = 9.0;
 const ROW_H: f32 = 13.0;
 /// Edge-grab zone (px), shrinks with note width so short notes keep a movable body.
 const EDGE_PX: f32 = 16.0;
@@ -231,12 +233,22 @@ pub fn show(
     let shift = ui.input(|i| i.modifiers.shift);
     let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
 
+    // The ruler is split: its top strip pans horizontally (like shift+wheel),
+    // the strip below it zooms horizontally around the cursor, and over the
+    // grid the wheel scrolls vertically.
+    let ruler_pan_bottom = origin.y + RULER_PAN_H;
     if let Some(hp) = hover
         && scrolled != Vec2::ZERO {
-            // Scrolling over the ruler (above the bar lines) — or shift+wheel —
-            // pans the view horizontally; over the grid it scrolls vertically.
-            if shift || hp.y < ui_top {
-                state.view_left += (- scrolled.x - scrolled.y) * 0.1;
+            if shift || hp.y < ruler_pan_bottom {
+                state.view_left += (- scrolled.x - scrolled.y) * 0.25;
+            } else if hp.y < ui_top {
+                let mx = hp.x;
+                let cur_step = (state.view_left + (mx - ui_left) / state.step_px)
+                    .clamp(0.0, total_steps as f32);
+                let factor = (scrolled.y * 0.01).exp();
+                let new_sp = (state.step_px * factor).clamp(6.0, 64.0);
+                state.step_px = new_sp;
+                state.view_left = (cur_step - (mx - ui_left) / new_sp).clamp(-1.0, total_steps as f32);
             } else {
                 state.view_top = (state.view_top + scrolled.y * 0.15).clamp(SCROLL_MIN, SCROLL_MAX);
             }
@@ -278,6 +290,11 @@ pub fn show(
     // ---- ruler band + gridlines ----
     let ruler_rect = Rect::from_min_max(origin, Pos2::new(origin.x + width, ui_top));
     painter.rect_filled(ruler_rect, 0.0, Color32::from_rgb(20, 20, 26));
+    // divider between the "pan" strip (top) and the "zoom" strip (below)
+    painter.line_segment(
+        [Pos2::new(origin.x, origin.y + RULER_PAN_H), Pos2::new(origin.x + width, origin.y + RULER_PAN_H)],
+        Stroke::new(1.0, Color32::from_rgb(70, 70, 84)),
+    );
     let grid_rect =
         Rect::from_min_max(Pos2::new(ui_left, ui_top), Pos2::new(ui_left + width - KEY_W, grid_bottom));
     for st in first_vis_step..=last_vis_step {
