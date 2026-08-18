@@ -545,6 +545,9 @@ impl Engine {
             note_names: String::new(),
             scheme: crate::pianoroll::Scheme::ByPitchClass,
             snap: 1,
+            clips: Vec::new(),
+            clip_names: Vec::new(),
+            active_clip: 0,
         }
     }
 

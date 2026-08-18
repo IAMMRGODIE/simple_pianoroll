@@ -96,6 +96,8 @@ pub struct EditorState {
     pub names: String,
     /// Multiple clips (patterns); `clips[active_clip]` is the one being edited.
     pub clips: Vec<Pattern>,
+    /// Parallel names for each clip (clips[i] / clip_names[i]).
+    pub clip_names: Vec<String>,
     pub active_clip: usize,
     pub clipboard: Vec<Note>,
     erasing: bool,
@@ -117,6 +119,7 @@ impl Default for EditorState {
             snap: 1,
             names: "C C# D D# E F F# G G# A A# B".to_string(),
             clips: Vec::new(),
+            clip_names: Vec::new(),
             active_clip: 0,
             clipboard: Vec::new(),
             erasing: false,

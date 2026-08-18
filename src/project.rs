@@ -28,6 +28,9 @@ pub struct Project {
     pub note_names: String,
     pub scheme: Scheme,
     pub snap: usize,
+    pub clips: Vec<Pattern>,
+    pub clip_names: Vec<String>,
+    pub active_clip: usize,
 }
 
 /// Pretty-print the project as a JSON string.

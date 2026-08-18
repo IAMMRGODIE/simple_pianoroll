@@ -172,6 +172,9 @@ impl eframe::App for PianoRollApp {
                         p.note_names = self.editor.names.clone();
                         p.scheme = self.editor.scheme;
                         p.snap = self.editor.snap;
+                        p.clips = self.editor.clips.clone();
+                        p.clip_names = self.editor.clip_names.clone();
+                        p.active_clip = self.editor.active_clip;
                         match project::to_json(&p) {
                             Ok(json) => {
                                 if let Err(e) = std::fs::write(&path, json) {
@@ -195,6 +198,19 @@ impl eframe::App for PianoRollApp {
                                     e.import_project(&p);
                                     pat = e.pattern().clone();
                                     drop(e);
+                                    if !p.clips.is_empty() {
+                                        self.editor.clips = p.clips.clone();
+                                        self.editor.clip_names = p.clip_names.clone();
+                                        self.editor.active_clip = p.active_clip.min(self.editor.clips.len() - 1);
+                                        if let Some(c) = self.editor.clips.get(self.editor.active_clip) {
+                                            pat = c.clone();
+                                        }
+                                        self.engine.lock().unwrap().set_pattern(pat.clone());
+                                    } else {
+                                        self.editor.clips = vec![pat.clone()];
+                                        self.editor.clip_names = vec!["Clip 0".to_string()];
+                                        self.editor.active_clip = 0;
+                                    }
                                     self.editor.names = p.note_names;
                                     self.editor.scheme = p.scheme;
                                     self.editor.snap = p.snap;
@@ -207,12 +223,24 @@ impl eframe::App for PianoRollApp {
 
                 ui.separator();
                 ui.label("Clips:");
+                let active_name = self
+                    .editor
+                    .clip_names
+                    .get(self.editor.active_clip)
+                    .cloned()
+                    .unwrap_or_else(|| format!("Clip {}", self.editor.active_clip));
                 egui::ComboBox::from_id_salt("clips")
-                    .selected_text(format!("Clip {}", self.editor.active_clip))
+                    .selected_text(active_name)
                     .show_ui(ui, |ui| {
                         for idx in 0..self.editor.clips.len() {
+                            let lbl = self
+                                .editor
+                                .clip_names
+                                .get(idx)
+                                .cloned()
+                                .unwrap_or_else(|| format!("Clip {idx}"));
                             if ui
-                                .selectable_label(self.editor.active_clip == idx, format!("Clip {idx}"))
+                                .selectable_label(self.editor.active_clip == idx, lbl)
                                 .clicked()
                             {
                                 self.editor.clips[self.editor.active_clip] = pat.clone();
@@ -227,11 +255,26 @@ impl eframe::App for PianoRollApp {
                             }
                         }
                     });
+                // rename the active clip
+                let mut nm = self
+                    .editor
+                    .clip_names
+                    .get(self.editor.active_clip)
+                    .cloned()
+                    .unwrap_or_default();
+                if ui
+                    .add(egui::TextEdit::singleline(&mut nm).desired_width(90.0).hint_text("name"))
+                    .changed()
+                    && let Some(slot) = self.editor.clip_names.get_mut(self.editor.active_clip) {
+                        *slot = nm;
+                    }
                 if ui.button("+ Clip").clicked() {
                     let total = pat.total_steps;
+                    let new_idx = self.editor.clips.len();
                     self.editor.clips.push(pattern::Pattern::empty(total));
-                    self.editor.active_clip = self.editor.clips.len() - 1;
-                    pat = self.editor.clips[self.editor.active_clip].clone();
+                    self.editor.clip_names.push(format!("Clip {new_idx}"));
+                    self.editor.active_clip = new_idx;
+                    pat = self.editor.clips[new_idx].clone();
                     self.engine.lock().unwrap().set_pattern(pat.clone());
                     self.editor.selection.clear();
                     let mut p2 = pat.clone();
@@ -244,6 +287,7 @@ impl eframe::App for PianoRollApp {
                     .clicked()
                 {
                     self.editor.clips.remove(self.editor.active_clip);
+                    self.editor.clip_names.remove(self.editor.active_clip);
                     if self.editor.active_clip >= self.editor.clips.len() {
                         self.editor.active_clip = self.editor.clips.len() - 1;
                     }
@@ -483,6 +527,7 @@ fn main() -> eframe::Result<()> {
             let mut editor = EditorState::default();
             let initial = engine.lock().unwrap().pattern().clone();
             editor.clips = vec![initial.clone()];
+            editor.clip_names = vec!["Clip 0".to_string()];
             editor.active_clip = 0;
             let mut seed = initial.clone();
             editor.begin_edit(&mut seed);
