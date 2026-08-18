@@ -59,7 +59,7 @@ impl eframe::App for PianoRollApp {
             let ev_cut = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Cut)));
             let ev_paste = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
             let ev_del = ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
-            let ev_d = mods.command && ui.input(|i| i.key_pressed(egui::Key::D));
+            let ev_d = mods.command && ui.input(|i| i.key_pressed(egui::Key::D) || i.key_pressed(egui::Key::B));
             let ev_z = mods.command && ui.input(|i| i.key_pressed(egui::Key::Z));
             let ev_y = mods.command && ui.input(|i| i.key_pressed(egui::Key::Y));
             // egui turns Ctrl+A into Event::SelectAll; keep Key::A as a fallback.
