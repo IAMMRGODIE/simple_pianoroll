@@ -204,11 +204,12 @@ fn auto_note_name(pitch: i32, spo: i32, names_spec: &str) -> String {
         .collect();
     let deg = pitch.rem_euclid(spo) as usize;
     let octave = 4 + pitch.div_euclid(spo);
-    let base = match names.get(deg) {
-        Some(name) => name.clone(),
-        None => deg.to_string(),
-    };
-    format!("{base}{octave}")
+    // letter names join the octave directly ("C4"); numeric fallback gets a
+    // space so it reads "0 4" instead of "04".
+    match names.get(deg) {
+        Some(name) => format!("{name}{octave}"),
+        None => format!("{deg} {octave}"),
+    }
 }
 
 /// Horizontal zoom keeping the pitch under `mx` fixed; returns (factor-applied
@@ -234,9 +235,9 @@ pub fn default_names(spo: usize) -> String {
     match spo {
         7 => "C D E F G A B".to_string(),
         12 => "C C# D D# E F F# G G# A A# B".to_string(),
-        19 => "C C♯ C× D D♯ D× E E♯ F F♯ F× G G♯ G× A A♯ A× B B♯".to_string(),
-        24 => "C C↑ C# C#↑ D D↑ D# D#↑ E E↑ F F↑ F# F#↑ G G↑ G# G#↑ A A↑ A# A#↑ B B↑".to_string(),
-        31 => "C C↑ C# Db Db↑ D D↑ D# Eb Eb↑ E Fb E# F F↑ F# Gb Gb↑ G G↑ G# Ab Ab↑ A A↑ A# Bb Bb↑ B Cb B#".to_string(),
+        19 => "C C# C× D D# D× E E# F F# F× G G# G× A A# A× B B#".to_string(),
+        24 => "C C⬆️ C# C#⬆️ D D⬆️ D# D#⬆️ E E⬆️ F F⬆️ F# F#⬆️ G G⬆️ G# G#⬆️ A A⬆️ A# A#⬆️ B B⬆️".to_string(),
+        31 => "C C⬆️ C# Db Db⬆️ D D⬆️ D# Eb Eb⬆️ E Fb E# F F⬆️ F# Gb Gb⬆️ G G⬆️ G# Ab Ab⬆️ A A⬆️ A# Bb Bb⬆️ B Cb B#".to_string(),
         _ => String::new(),
     }
 }

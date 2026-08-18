@@ -99,6 +99,7 @@ pub struct Engine {
     sample_counter: usize,
     loop_samples: usize,
     playing: bool,
+    play_start_pos: usize, // ruler position when playback last started
     stop_pending: bool,
     preview: Vec<PreviewNote>,
     events_buf: Vec<NoteEvent>,
@@ -196,6 +197,7 @@ impl Engine {
             loop_samples,
             sample_counter: 0,
             playing: true,
+            play_start_pos: 0,
             stop_pending: false,
             preview: Vec::new(),
             events_buf: Vec::new(),
@@ -419,9 +421,13 @@ impl Engine {
     }
 
     pub fn set_playing(&mut self, playing: bool) {
-        if !playing && self.playing {
+        if playing && !self.playing {
+            // remember where the ruler was when playback starts
+            self.play_start_pos = self.sample_counter;
+        } else if !playing && self.playing {
             self.stop_pending = true;
-            self.sample_counter = 0; // return the playhead to the start
+            // return the ruler to where it was when playback started
+            self.sample_counter = self.play_start_pos;
         }
         self.playing = playing;
     }
