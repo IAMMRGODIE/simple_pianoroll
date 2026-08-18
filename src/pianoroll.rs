@@ -41,17 +41,19 @@ pub enum Scheme {
     ByPitchClass,
     ByOctave,
     Flat,
+    Custom,
 }
 
 impl Scheme {
     pub fn all() -> &'static [Scheme] {
-        &[Scheme::ByPitchClass, Scheme::ByOctave, Scheme::Flat]
+        &[Scheme::ByPitchClass, Scheme::ByOctave, Scheme::Flat, Scheme::Custom]
     }
     pub fn label(self) -> &'static str {
         match self {
             Scheme::ByPitchClass => "By pitch class",
             Scheme::ByOctave => "By octave",
             Scheme::Flat => "Flat",
+            Scheme::Custom => "Custom",
         }
     }
 }
@@ -87,9 +89,14 @@ pub struct EditorState {
     pub view_left: f32,
     pub view_top: f32,
     pub scheme: Scheme,
+    /// User-editable palette for the Custom color scheme (RGB per degree).
+    pub custom_colors: Vec<[u8; 3]>,
     pub snap: usize,
     /// User-configurable base note names (space/comma separated), fed to the auto-namer.
     pub names: String,
+    /// Multiple clips (patterns); `clips[active_clip]` is the one being edited.
+    pub clips: Vec<Pattern>,
+    pub active_clip: usize,
     pub clipboard: Vec<Note>,
     erasing: bool,
     history: Vec<Pattern>,
@@ -106,8 +113,11 @@ impl Default for EditorState {
             view_left: 0.0,
             view_top: 60.0,
             scheme: Scheme::ByPitchClass,
+            custom_colors: rainbow_palette(12),
             snap: 1,
             names: "C C# D D# E F F# G G# A A# B".to_string(),
+            clips: Vec::new(),
+            active_clip: 0,
             clipboard: Vec::new(),
             erasing: false,
             history: Vec::new(),
@@ -185,8 +195,41 @@ impl EditorState {
     }
 }
 
-fn note_color(pitch: i32, spo: i32, scheme: Scheme) -> Color32 {
+/// HSV (h in [0,1]) -> 8-bit RGB.
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
+    let i = (h * 6.0).floor() as i32;
+    let f = h * 6.0 - i as f32;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - f * s);
+    let t = v * (1.0 - (1.0 - f) * s);
+    let (r, g, b) = match i.rem_euclid(6) {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]
+}
+
+/// A rainbow palette of `n` RGB colors (used as the default / seed for `Custom`).
+pub fn rainbow_palette(n: usize) -> Vec<[u8; 3]> {
+    (0..n)
+        .map(|i| hsv_to_rgb(i as f32 / n.max(1) as f32, 0.65, 0.75))
+        .collect()
+}
+
+fn note_color(pitch: i32, spo: i32, scheme: Scheme, custom: &[[u8; 3]]) -> Color32 {
     match scheme {
+        Scheme::Custom => {
+            if custom.is_empty() {
+                return Color32::from_rgb(96, 200, 96);
+            }
+            let deg = pitch.rem_euclid(spo) as usize;
+            let c = custom[deg % custom.len()];
+            Color32::from_rgb(c[0], c[1], c[2])
+        }
         Scheme::Flat => Color32::from_rgb(96, 200, 96),
         Scheme::ByOctave => {
             let o = pitch.div_euclid(spo.max(1));
@@ -444,7 +487,7 @@ pub fn show(
         if r.right() < ui_left || r.left() > ui_left + width - KEY_W {
             continue;
         }
-        painter.rect_filled(*r, 3.0, note_color(n.pitch_index, spo, state.scheme));
+        painter.rect_filled(*r, 3.0, note_color(n.pitch_index, spo, state.scheme, &state.custom_colors));
         painter.rect_stroke(
             *r,
             3.0,
@@ -489,7 +532,7 @@ pub fn show(
             Pos2::new(x_of(s0 as f32), y_of(*pitch as f32) + 1.0),
             Vec2::new((s1 - s0 + 1) as f32 * step_px - 1.0, ROW_H - 2.0),
         );
-        painter.rect_filled(preview_rect, 3.0, note_color(*pitch, spo, state.scheme).gamma_multiply(0.5));
+        painter.rect_filled(preview_rect, 3.0, note_color(*pitch, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
     }
 
     // ===================== interaction =====================

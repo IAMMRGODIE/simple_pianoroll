@@ -194,6 +194,39 @@ impl eframe::App for PianoRollApp {
                                 Err(e) => eprintln!("could not parse project: {e}"),
                             }
                         }
+
+                ui.separator();
+                ui.label("Clips:");
+                egui::ComboBox::from_id_salt("clips")
+                    .selected_text(format!("Clip {}", self.editor.active_clip))
+                    .show_ui(ui, |ui| {
+                        for idx in 0..self.editor.clips.len() {
+                            if ui
+                                .selectable_label(self.editor.active_clip == idx, format!("Clip {idx}"))
+                                .clicked()
+                            {
+                                self.editor.clips[self.editor.active_clip] = pat.clone();
+                                self.editor.active_clip = idx;
+                                if let Some(c) = self.editor.clips.get(idx) {
+                                    pat = c.clone();
+                                }
+                                self.engine.lock().unwrap().set_pattern(pat.clone());
+                                self.editor.selection.clear();
+                                let mut p2 = pat.clone();
+                                self.editor.begin_edit(&mut p2);
+                            }
+                        }
+                    });
+                if ui.button("＋ Clip").clicked() {
+                    let total = pat.total_steps;
+                    self.editor.clips.push(pattern::Pattern::empty(total));
+                    self.editor.active_clip = self.editor.clips.len() - 1;
+                    pat = self.editor.clips[self.editor.active_clip].clone();
+                    self.engine.lock().unwrap().set_pattern(pat.clone());
+                    self.editor.selection.clear();
+                    let mut p2 = pat.clone();
+                    self.editor.begin_edit(&mut p2);
+                }
             });
         });
 
@@ -231,6 +264,20 @@ impl eframe::App for PianoRollApp {
                             }
                         }
                     });
+                if self.editor.scheme == pianoroll::Scheme::Custom {
+                    // per-degree color editors (capped so the panel stays sane)
+                    let spo = self.engine.lock().unwrap().tuning_kind().steps_per_octave();
+                    let cap = spo.min(24);
+                    while self.editor.custom_colors.len() < cap {
+                        self.editor.custom_colors.push([140, 140, 140]);
+                    }
+                    self.editor.custom_colors.truncate(cap);
+                    ui.horizontal_wrapped(|ui| {
+                        for i in 0..cap {
+                            ui.color_edit_button_srgb(&mut self.editor.custom_colors[i]);
+                        }
+                    });
+                }
 
                 ui.separator();
                 ui.label("Note names:");
@@ -406,8 +453,11 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |_cc| {
             let mut editor = EditorState::default();
-            let mut initial = engine.lock().unwrap().pattern().clone();
-            editor.begin_edit(&mut initial); // seed the history with the initial state
+            let initial = engine.lock().unwrap().pattern().clone();
+            editor.clips = vec![initial.clone()];
+            editor.active_clip = 0;
+            let mut seed = initial.clone();
+            editor.begin_edit(&mut seed);
             Ok(Box::new(PianoRollApp { engine, editor }))
         }),
     )
