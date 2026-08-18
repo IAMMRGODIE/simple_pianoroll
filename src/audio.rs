@@ -5,6 +5,7 @@
 //! pattern `i_am_dsp`'s `DspDemo` uses). The audio callback locks once per
 //! buffer and pulls one stereo sample per call.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
@@ -89,7 +90,9 @@ struct EffectSlot {
 /// Shared engine state, read/written by the audio callback and the UI thread.
 pub struct Engine {
     tuning_kind: TuningKind,
-    generator: Adsr<WaveTableSmoother, TuningWrapper, 2>,
+    generator: Adsr<OscillatorSmoother<2>, TuningWrapper, 2>,
+    using_sample: bool,
+    sample_path: Option<PathBuf>,
     sample_rate: usize,
     tempo: f32,
     pattern: Pattern,
@@ -103,18 +106,44 @@ pub struct Engine {
     effects: Vec<EffectSlot>,
 }
 
-fn build_generator(
-    sample_rate: usize,
-    kind: TuningKind,
-    wave: Waveform,
-) -> Adsr<WaveTableSmoother, TuningWrapper, 2> {
+/// Build the oscillator for a generated waveform (boxed so it can be swapped
+/// for a loaded sample).
+fn wave_box(wave: Waveform) -> Box<dyn Oscillator<2> + Send + Sync> {
     let table: Box<dyn WaveTable + Send + Sync> = match wave {
         Waveform::Sine => Box::new(SineWave),
         Waveform::Triangle => Box::new(TriangleWave),
         Waveform::Saw => Box::new(SawWave),
         Waveform::Square => Box::new(SquareWave),
     };
-    let smoother = WaveTableSmoother::new(vec![table], 0.0);
+    Box::new(WaveTableSmoother::new(vec![table], 0.0))
+}
+
+/// Build the generator: its oscillator is either the selected waveform or a
+/// loaded sample (re-loaded from `sample_path`, since `Sampler` isn't Clone).
+fn build_generator(
+    sample_rate: usize,
+    kind: TuningKind,
+    wave: Waveform,
+    using_sample: bool,
+    sample_path: Option<PathBuf>,
+) -> Adsr<OscillatorSmoother<2>, TuningWrapper, 2> {
+    let osc: Box<dyn Oscillator<2> + Send + Sync> = if using_sample {
+        match &sample_path {
+            Some(path) => {
+                let mut sm = Sampler::<2>::new(sample_rate);
+                if let Err(e) = sm.load_from_file(path) {
+                    eprintln!("WARNING: failed to load sample: {e}");
+                    wave_box(wave)
+                } else {
+                    Box::new(sm)
+                }
+            }
+            None => wave_box(wave),
+        }
+    } else {
+        wave_box(wave)
+    };
+    let smoother = OscillatorSmoother::new(vec![osc], 0.0);
     Adsr::new(smoother, kind.make(), sample_rate)
 }
 
@@ -124,7 +153,7 @@ impl Engine {
         let tempo = pattern::DEFAULT_TEMPO;
         let loop_samples = pattern::loop_samples(&pattern, sample_rate, tempo);
         let timbre = Timbre::default();
-        let generator = build_generator(sample_rate, kind, timbre.waveform);
+        let generator = build_generator(sample_rate, kind, timbre.waveform, false, None);
         let effects: Vec<EffectSlot> = vec![
             EffectSlot {
                 name: "Lowpass",
@@ -153,6 +182,8 @@ impl Engine {
             events_buf: Vec::new(),
             timbre,
             effects,
+            using_sample: false,
+            sample_path: None,
         }
     }
 
@@ -256,8 +287,14 @@ impl Engine {
     }
 
     pub fn set_timbre(&mut self, t: Timbre) {
-        if t.waveform != self.timbre.waveform {
-            self.generator = build_generator(self.sample_rate, self.tuning_kind, t.waveform);
+        if t.waveform != self.timbre.waveform && !self.using_sample {
+            self.generator = build_generator(
+                self.sample_rate,
+                self.tuning_kind,
+                t.waveform,
+                self.using_sample,
+                self.sample_path.clone(),
+            );
         }
         self.timbre = t;
         self.generator.attack_time = t.attack;
@@ -266,6 +303,41 @@ impl Engine {
         self.generator.sustain_level = t.sustain;
         self.generator.release_time = t.release;
         self.generator.gain = t.gain;
+    }
+
+    // ---- sample source ----
+    pub fn using_sample(&self) -> bool {
+        self.using_sample
+    }
+    pub fn sample_path(&self) -> Option<PathBuf> {
+        self.sample_path.clone()
+    }
+
+    /// Load an audio file as the track's sound source (a resampler/sampler).
+    pub fn load_sample(&mut self, path: impl AsRef<std::path::Path>) -> bool {
+        let path = path.as_ref().to_path_buf();
+        self.sample_path = Some(path);
+        self.using_sample = true;
+        self.generator = build_generator(
+            self.sample_rate,
+            self.tuning_kind,
+            self.timbre.waveform,
+            true,
+            self.sample_path.clone(),
+        );
+        true
+    }
+
+    /// Switch back to the selected generated waveform.
+    pub fn use_wave(&mut self) {
+        self.using_sample = false;
+        self.generator = build_generator(
+            self.sample_rate,
+            self.tuning_kind,
+            self.timbre.waveform,
+            false,
+            None,
+        );
     }
 
     // ---- effects ----
@@ -317,7 +389,7 @@ impl Engine {
             return;
         }
         self.tuning_kind = kind;
-        self.generator = build_generator(self.sample_rate, kind, self.timbre.waveform);
+        self.generator = build_generator(self.sample_rate, kind, self.timbre.waveform, self.using_sample, self.sample_path.clone());
     }
 
     pub fn set_tempo(&mut self, bpm: f32) {

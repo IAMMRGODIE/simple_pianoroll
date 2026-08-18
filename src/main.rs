@@ -23,6 +23,7 @@ use tuning::TuningKind;
 struct PianoRollApp {
     engine: Arc<Mutex<Engine>>,
     editor: EditorState,
+    sample_path_input: String,
 }
 
 impl eframe::App for PianoRollApp {
@@ -262,6 +263,35 @@ impl eframe::App for PianoRollApp {
                 self.engine.lock().unwrap().set_timbre(tb);
             }
 
+            // sample source (user-loaded timbre via the resampler)
+            ui.separator();
+            if self.engine.lock().unwrap().using_sample() {
+                ui.label("Source: loaded sample");
+                if let Some(p) = self.engine.lock().unwrap().sample_path() {
+                    let name = p.file_name().and_then(|x| x.to_str()).unwrap_or("sample").to_string();
+                    ui.label(name);
+                }
+                if ui.button("Use generated wave").clicked() {
+                    self.engine.lock().unwrap().use_wave();
+                }
+            } else {
+                ui.horizontal(|ui| {
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.sample_path_input)
+                            .hint_text("path/to/sample.wav")
+                            .desired_width(150.0),
+                    );
+                    resp.on_hover_text("Absolute path to a WAV file to use as the track sound (resampler).");
+                    if ui.button("Load").clicked() {
+                        let path = std::path::PathBuf::from(self.sample_path_input.trim());
+                        let mut e = self.engine.lock().unwrap();
+                        if !e.load_sample(&path) {
+                            eprintln!("failed to load sample: {}", self.sample_path_input);
+                        }
+                    }
+                });
+            }
+
             ui.separator();
             ui.heading("Effects");
             let count = self.engine.lock().unwrap().effect_count();
@@ -331,7 +361,11 @@ fn main() -> eframe::Result<()> {
             let mut editor = EditorState::default();
             let mut initial = engine.lock().unwrap().pattern().clone();
             editor.begin_edit(&mut initial); // seed the history with the initial state
-            Ok(Box::new(PianoRollApp { engine, editor }))
+            Ok(Box::new(PianoRollApp {
+                engine,
+                editor,
+                sample_path_input: String::new(),
+            }))
         }),
     )
 }
