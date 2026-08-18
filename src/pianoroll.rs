@@ -184,10 +184,18 @@ impl EditorState {
         }
         self.begin_edit(pat);
         let selected: Vec<Note> = pat.notes.iter().filter(|n| self.selection.contains(&n.id)).cloned().collect();
+        if selected.is_empty() {
+            return;
+        }
         let total = pat.total_steps;
+        // Place the copies right after the selected segment (not after the first note):
+        // shift the whole block by (max_end - min_start).
+        let min_start = selected.iter().map(|n| n.start_step).min().unwrap_or(0);
+        let max_end = selected.iter().map(|n| n.start_step + n.length_steps).max().unwrap_or(0);
+        let block = max_end - min_start;
         let mut new_sel = HashSet::new();
         for n in &selected {
-            let ns = (n.start_step + n.length_steps).min(total.saturating_sub(1));
+            let ns = (n.start_step + block).min(total.saturating_sub(1));
             let id = pat.duplicate(n, ns, n.length_steps);
             new_sel.insert(id);
         }
@@ -574,15 +582,21 @@ pub fn show(
         && let Some(p0) = grid_resp.interact_pointer_pos()
     {
         let cell = (pitch_of(p0.y).round() as i32, step_floor(p0.x));
-        if shift {
+        if ctrl {
+            // ctrl+drag = marquee; clear any existing selection first (unless
+            // shift is held, which keeps/merges the selection).
+            if !shift {
+                state.selection.clear();
+            }
+            state.drag = Some(Drag::Marquee { start: p0, cur: p0 });
+        } else if !ctrl && shift {
+            // shift+drag (without ctrl) draws a long note
             state.begin_edit(pat);
             state.drag = Some(Drag::Draw {
                 pitch: pitch_clamp(cell.0),
                 start_step: ((snap_to(cell.1, snap)).max(0)) as usize,
                 cur_step: ((snap_to(cell.1, snap)).max(0)) as usize,
             });
-        } else if ctrl {
-            state.drag = Some(Drag::Marquee { start: p0, cur: p0 });
         }
     }
     if grid_resp.dragged()

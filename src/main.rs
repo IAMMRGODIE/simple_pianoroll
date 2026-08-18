@@ -375,11 +375,11 @@ impl eframe::App for PianoRollApp {
                         ui.selectable_value(&mut tb.waveform, w, wave_label(w));
                     }
                 });
-            ui.add(egui::Slider::new(&mut tb.attack, 1.0..=2000.0).text("Attack").logarithmic(true));
-            ui.add(egui::Slider::new(&mut tb.hold, 0.0..=2000.0).text("Hold").logarithmic(true));
-            ui.add(egui::Slider::new(&mut tb.decay, 0.0..=2000.0).text("Decay").logarithmic(true));
+            ui.add(egui::Slider::new(&mut tb.attack, 1.0..=2000.0).text("Attack"));
+            ui.add(egui::Slider::new(&mut tb.hold, 0.0..=2000.0).text("Hold"));
+            ui.add(egui::Slider::new(&mut tb.decay, 0.0..=2000.0).text("Decay"));
             ui.add(egui::Slider::new(&mut tb.sustain, 0.0..=1.0).text("Sustain"));
-            ui.add(egui::Slider::new(&mut tb.release, 1.0..=2000.0).text("Release").logarithmic(true));
+            ui.add(egui::Slider::new(&mut tb.release, 1.0..=2000.0).text("Release"));
             ui.add(egui::Slider::new(&mut tb.gain, 0.0..=2.0).text("Gain"));
             if tb != tb_orig {
                 self.engine.lock().unwrap().set_timbre(tb);
