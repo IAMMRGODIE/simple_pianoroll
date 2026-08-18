@@ -388,9 +388,10 @@ pub fn show(
             } else {
                 n.label.clone()
             };
+            // left-aligned label, slightly inset from the note's left edge
             painter.text(
-                r.center(),
-                Align2::CENTER_CENTER,
+                Pos2::new(r.left() + 3.0, r.center().y),
+                Align2::LEFT_CENTER,
                 text,
                 egui::FontId::proportional(9.0),
                 Color32::from_rgb(20, 20, 20),
