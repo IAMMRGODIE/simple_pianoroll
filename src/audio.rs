@@ -573,6 +573,7 @@ impl Engine {
             clips: Vec::new(),
             clip_names: Vec::new(),
             active_clip: 0,
+            custom_ratios: self.custom_ratios.clone(),
         }
     }
 

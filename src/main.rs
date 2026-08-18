@@ -188,6 +188,7 @@ impl eframe::App for PianoRollApp {
                         p.scheme = self.editor.scheme;
                         p.snap = self.editor.snap;
                         p.tonic = self.editor.tonic;
+                        p.custom_ratios = self.custom_ratios_input.clone();
                         p.clips = self.editor.clips.clone();
                         p.clip_names = self.editor.clip_names.clone();
                         p.active_clip = self.editor.active_clip;
@@ -227,6 +228,8 @@ impl eframe::App for PianoRollApp {
                                         self.editor.clip_names = vec!["Clip 0".to_string()];
                                         self.editor.active_clip = 0;
                                     }
+                                    self.custom_ratios_input = p.custom_ratios.clone();
+                                    self.engine.lock().unwrap().set_custom_ratios(p.custom_ratios.clone());
                                     self.editor.names = p.note_names;
                                     self.editor.scheme = p.scheme;
                                     self.editor.snap = p.snap;

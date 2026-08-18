@@ -43,7 +43,7 @@ impl Pattern {
     /// 8 beats = 32 steps.
     pub fn demo() -> Self {
         let pitches = [9, 12, 16, 12, 9, 7, 4, 0];
-        let mut p = Self::empty(8 * STEPS_PER_BEAT);
+        let mut p = Self::empty(16 * STEPS_PER_BEAT);
         for (i, &pitch) in pitches.iter().enumerate() {
             let id = p.take_id();
             p.notes.push(Note {

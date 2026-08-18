@@ -32,6 +32,8 @@ pub struct Project {
     pub clips: Vec<Pattern>,
     pub clip_names: Vec<String>,
     pub active_clip: usize,
+    /// Custom scale ratios (note/root), used when tuning == Custom.
+    pub custom_ratios: Vec<f32>,
 }
 
 /// Pretty-print the project as a JSON string.
