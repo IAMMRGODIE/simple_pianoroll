@@ -150,10 +150,14 @@ impl eframe::App for PianoRollApp {
 
                 ui.separator();
                 if ui.button("💾 Save").clicked()
-                    && let Some(path) = rfd::FileDialog::new()
+                    && let Some(mut path) = rfd::FileDialog::new()
                         .set_file_name("project.json")
                         .save_file()
                     {
+                        // make sure the file gets a .json extension automatically
+                        if path.extension().map(|e| e != "json").unwrap_or(true) {
+                            path.set_extension("json");
+                        }
                         let mut p = self.engine.lock().unwrap().export_project();
                         p.note_names = self.editor.names.clone();
                         p.scheme = self.editor.scheme;
@@ -174,15 +178,18 @@ impl eframe::App for PianoRollApp {
                         && let Ok(json) = std::fs::read_to_string(&path) {
                             match project::from_json(&json) {
                                 Ok(p) => {
+                                    // import into the engine, then sync the local
+                                    // snapshot so the frame-end write-back doesn't
+                                    // immediately revert the loaded pattern.
                                     let mut e = self.engine.lock().unwrap();
                                     e.import_project(&p);
+                                    pat = e.pattern().clone();
+                                    drop(e);
                                     self.editor.names = p.note_names;
                                     self.editor.scheme = p.scheme;
                                     self.editor.snap = p.snap;
                                     self.editor.selection.clear();
-                                    let mut loaded = e.pattern().clone();
-                                    drop(e);
-                                    self.editor.begin_edit(&mut loaded);
+                                    self.editor.begin_edit(&mut pat);
                                 }
                                 Err(e) => eprintln!("could not parse project: {e}"),
                             }
