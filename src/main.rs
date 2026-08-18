@@ -189,6 +189,13 @@ impl eframe::App for PianoRollApp {
                         p.snap = self.editor.snap;
                         p.tonic = self.editor.tonic;
                         p.custom_ratios = self.custom_ratios_input.clone();
+                        // keep the live edits of the active clip before saving
+                        if !self.editor.clips.is_empty() {
+                            let a = self.editor.active_clip;
+                            if a < self.editor.clips.len() {
+                                self.editor.clips[a] = pat.clone();
+                            }
+                        }
                         p.clips = self.editor.clips.clone();
                         p.clip_names = self.editor.clip_names.clone();
                         p.active_clip = self.editor.active_clip;
