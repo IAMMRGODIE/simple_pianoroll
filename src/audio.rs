@@ -131,11 +131,33 @@ fn build_generator(
         match &sample_path {
             Some(path) => {
                 let mut sm = Sampler::<2>::new(sample_rate);
-                if let Err(e) = sm.load_from_file(path) {
-                    eprintln!("WARNING: failed to load sample: {e}");
-                    wave_box(wave)
-                } else {
-                    Box::new(sm)
+                match sm.load_from_file(path) {
+                    Err(e) => {
+                        eprintln!("WARNING: failed to load sample: {e}");
+                        wave_box(wave)
+                    }
+                    Ok(None) => {
+                        // sample rate matched: pcm already set
+                        Box::new(sm)
+                    }
+                    Ok(Some(handle)) => {
+                        // file needs resampling to the engine rate; join the thread,
+                        // take the resampled pcm and hand it to set_pcm_data.
+                        match handle.thread_handle.join() {
+                            Ok(Ok(pcm)) => {
+                                sm.set_pcm_data(pcm);
+                                Box::new(sm)
+                            }
+                            Ok(Err(e)) => {
+                                eprintln!("WARNING: sample resample failed: {e}");
+                                wave_box(wave)
+                            }
+                            Err(_) => {
+                                eprintln!("WARNING: sample resample thread panicked");
+                                wave_box(wave)
+                            }
+                        }
+                    }
                 }
             }
             None => wave_box(wave),
