@@ -45,7 +45,7 @@ struct PreviewNote {
 }
 
 /// Selectable oscillator waveform for the track's voice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Waveform {
     Sine,
     Triangle,
@@ -54,7 +54,7 @@ pub enum Waveform {
 }
 
 /// Simple single-voice timbre: waveform + ADSR + gain.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Timbre {
     pub waveform: Waveform,
     pub attack: f32,
@@ -461,6 +461,42 @@ impl Engine {
         pattern::step_at(self.sample_counter, self.sample_rate, self.tempo)
             % self.pattern.total_steps.max(1)
     }
+    // ---- project save/load ----
+    /// Snapshot the current project state.
+    pub fn export_project(&self) -> crate::project::Project {
+        crate::project::Project {
+            pattern: self.pattern.clone(),
+            tempo: self.tempo,
+            tuning: self.tuning_kind,
+            waveform: self.timbre.waveform,
+            timbre: self.timbre,
+            effects: self
+                .effects
+                .iter()
+                .map(|e| crate::project::EffectState { on: e.on, mix: e.mix })
+                .collect(),
+            note_names: String::new(),
+            scheme: crate::pianoroll::Scheme::ByPitchClass,
+            snap: 1,
+        }
+    }
+
+    /// Apply a loaded project's engine state (pattern, tempo, tuning, timbre, effects).
+    pub fn import_project(&mut self, p: &crate::project::Project) {
+        self.set_pattern(p.pattern.clone());
+        self.set_tempo(p.tempo);
+        if p.tuning != self.tuning_kind {
+            self.set_tuning(p.tuning);
+        }
+        if p.timbre != self.timbre {
+            self.set_timbre(p.timbre);
+        }
+        for (i, es) in p.effects.iter().enumerate() {
+            self.set_effect_on(i, es.on);
+            self.set_effect_mix(i, es.mix);
+        }
+    }
+
 }
 
 /// Open the default output device and start streaming. Returns the shared

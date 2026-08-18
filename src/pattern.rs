@@ -18,7 +18,7 @@ pub const DEFAULT_TEMPO: f32 = 120.0;
 
 /// A note in the pattern. `pitch_index` is our uniform EDO degree
 /// (0 == reference C4); times are in grid *steps*.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Note {
     /// Stable identity, used by the editor for selections.
     pub id: u64,
@@ -31,7 +31,7 @@ pub struct Note {
 }
 
 /// The editable loop: a list of notes plus its total length in steps.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Pattern {
     pub notes: Vec<Note>,
     pub total_steps: usize,

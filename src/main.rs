@@ -9,6 +9,7 @@
 mod audio;
 mod pattern;
 mod pianoroll;
+mod project;
 mod tuning;
 
 use std::sync::{Arc, Mutex};
@@ -146,6 +147,46 @@ impl eframe::App for PianoRollApp {
                     let _ = std::mem::replace(&mut pat, Pattern::demo());
                     self.editor.selection.clear();
                 }
+
+                ui.separator();
+                if ui.button("💾 Save").clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("project.json")
+                        .save_file()
+                    {
+                        let mut p = self.engine.lock().unwrap().export_project();
+                        p.note_names = self.editor.names.clone();
+                        p.scheme = self.editor.scheme;
+                        p.snap = self.editor.snap;
+                        match project::to_json(&p) {
+                            Ok(json) => {
+                                if let Err(e) = std::fs::write(&path, json) {
+                                    eprintln!("save failed: {e}");
+                                }
+                            }
+                            Err(e) => eprintln!("could not serialize project: {e}"),
+                        }
+                    }
+                if ui.button("📂 Open").clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Project", &["json"])
+                        .pick_file()
+                        && let Ok(json) = std::fs::read_to_string(&path) {
+                            match project::from_json(&json) {
+                                Ok(p) => {
+                                    let mut e = self.engine.lock().unwrap();
+                                    e.import_project(&p);
+                                    self.editor.names = p.note_names;
+                                    self.editor.scheme = p.scheme;
+                                    self.editor.snap = p.snap;
+                                    self.editor.selection.clear();
+                                    let mut loaded = e.pattern().clone();
+                                    drop(e);
+                                    self.editor.begin_edit(&mut loaded);
+                                }
+                                Err(e) => eprintln!("could not parse project: {e}"),
+                            }
+                        }
             });
         });
 

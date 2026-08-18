@@ -12,7 +12,7 @@ pub const REF_NOTE: i32 = 48;
 
 /// The set of tunings the UI offers. Selecting one also sets the number of
 /// rows per octave on the piano-roll grid in later milestones.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TuningKind {
     Equal12,
     Edo7,

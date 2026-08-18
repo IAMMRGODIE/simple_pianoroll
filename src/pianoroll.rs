@@ -28,7 +28,7 @@ pub enum Edge {
     Right,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Scheme {
     ByPitchClass,
     ByOctave,
