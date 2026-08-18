@@ -72,7 +72,7 @@ impl Default for Timbre {
     fn default() -> Self {
         Self {
             waveform: Waveform::Sine,
-            attack: 2.0, // crisper onset so notes line up with the metronome
+            attack: 10.0,
             hold: 100.0,
             decay: 100.0,
             sustain: 1.0,
@@ -373,6 +373,9 @@ impl Engine {
     fn apply_timbre_params(&mut self) {
         let t = self.timbre;
         let g = &mut self.generator;
+        // Start notes at the wave's peak (phase 0.25) so the onset is immediately
+        // audible and lines up with the (instant) metronome tick.
+        g.set_parameter("phase_start", SetValue::Float(0.25));
         g.set_parameter("attack_time", SetValue::Float(t.attack));
         g.set_parameter("hold_time", SetValue::Float(t.hold));
         g.set_parameter("decay_time", SetValue::Float(t.decay));
