@@ -31,14 +31,18 @@ struct PianoRollApp {
 
 impl eframe::App for PianoRollApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // If a text field (label / name / ratio editor) is focused, don't let
+        // the piano-roll shortcuts trigger while the user is typing.
+        let typing = ui.ctx().wants_keyboard_input();
+
         // Space toggles play/pause (brief lock).
-        if ui.input(|i| i.key_pressed(egui::Key::Space)) {
+        if !typing && ui.input(|i| i.key_pressed(egui::Key::Space)) {
             let mut e = self.engine.lock().unwrap();
             let p = !e.playing();
             e.set_playing(p);
         }
         // Home / W: rewind the transport to the start.
-        if ui.input(|i| i.key_pressed(egui::Key::Home)) {
+        if !typing && ui.input(|i| i.key_pressed(egui::Key::Home)) {
             self.engine.lock().unwrap().rewind();
         }
 
@@ -48,7 +52,7 @@ impl eframe::App for PianoRollApp {
         let ph = self.engine.lock().unwrap().playhead_step();
 
         // ---- keyboard shortcuts (work on the local pattern + editor) ----
-        {
+        if !typing {
             let mods = ui.input(|i| i.modifiers);
             // egui turns Ctrl+C/V/X into Event::Copy/Paste/Cut before the reader sees them.
             let ev_copy = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)));
