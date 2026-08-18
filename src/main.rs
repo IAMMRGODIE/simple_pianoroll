@@ -229,10 +229,8 @@ impl eframe::App for PianoRollApp {
                 }
                 let del_enabled = self.editor.clips.len() > 1;
                 if ui
-                    .add_enabled(
-                        del_enabled,
-                        egui::Button::new("- Clip").on_hover_text("Delete the current clip (disabled when it is the only clip)"),
-                    )
+                    .add_enabled(del_enabled, egui::Button::new("- Clip"))
+                    .on_hover_text("Delete the current clip (disabled when it is the only clip)")
                     .clicked()
                 {
                     self.editor.clips.remove(self.editor.active_clip);
