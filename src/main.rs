@@ -227,6 +227,26 @@ impl eframe::App for PianoRollApp {
                     let mut p2 = pat.clone();
                     self.editor.begin_edit(&mut p2);
                 }
+                let del_enabled = self.editor.clips.len() > 1;
+                if ui
+                    .add_enabled(
+                        del_enabled,
+                        egui::Button::new("- Clip").on_hover_text("Delete the current clip (disabled when it is the only clip)"),
+                    )
+                    .clicked()
+                {
+                    self.editor.clips.remove(self.editor.active_clip);
+                    if self.editor.active_clip >= self.editor.clips.len() {
+                        self.editor.active_clip = self.editor.clips.len() - 1;
+                    }
+                    if let Some(c) = self.editor.clips.get(self.editor.active_clip) {
+                        pat = c.clone();
+                    }
+                    self.engine.lock().unwrap().set_pattern(pat.clone());
+                    self.editor.selection.clear();
+                    let mut p2 = pat.clone();
+                    self.editor.begin_edit(&mut p2);
+                }
             });
         });
 
