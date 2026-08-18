@@ -275,6 +275,7 @@ pub fn show(
         (d, wc, ws)
     });
     let (scrolled, wheel_ctrl, wheel_shift) = wheel;
+    let scrolled = scrolled * 16.0;
 
     let hover = ui.input(|i| i.pointer.hover_pos());
     let shift = ui.input(|i| i.modifiers.shift);
