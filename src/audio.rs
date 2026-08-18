@@ -110,6 +110,8 @@ pub struct Engine {
     effects: Vec<EffectSlot>,
     metronome: bool,
     metronome_volume: f32,
+    /// User ratios for the Custom scale (relative to root).
+    custom_ratios: Vec<f32>,
     last_step: usize,
     click_t: f32,
     click_freq: f32,
@@ -121,7 +123,7 @@ pub struct Engine {
 /// Builder for a single generated waveform (used when no sample is loaded).
 fn wave_adsr(
     sample_rate: usize,
-    kind: TuningKind,
+    tuning: TuningWrapper,
     wave: Waveform,
 ) -> Adsr<WaveTableSmoother, TuningWrapper, 2> {
     let table: Box<dyn WaveTable + Send + Sync> = match wave {
@@ -131,7 +133,7 @@ fn wave_adsr(
         Waveform::Square => Box::new(SquareWave),
     };
     let smoother = WaveTableSmoother::new(vec![table], 0.0);
-    Adsr::new(smoother, kind.make(), sample_rate)
+    Adsr::new(smoother, tuning, sample_rate)
 }
 
 /// Build the boxed generator. Like i_am_dsp's demo, the waveform oscillator and
@@ -141,7 +143,7 @@ fn wave_adsr(
 /// file needs resampling we join the background thread and feed via `set_pcm_data`.
 fn build_generator(
     sample_rate: usize,
-    kind: TuningKind,
+    tuning: TuningWrapper,
     wave: Waveform,
     using_sample: bool,
     sample_path: Option<PathBuf>,
@@ -171,11 +173,11 @@ fn build_generator(
                 },
             };
             if loaded {
-                return Box::new(Adsr::new(sm, kind.make(), sample_rate));
+                return Box::new(Adsr::new(sm, tuning, sample_rate));
             }
             // fall through to the waveform if the sample failed to load
         }
-    Box::new(wave_adsr(sample_rate, kind, wave))
+    Box::new(wave_adsr(sample_rate, tuning, wave))
 }
 
 impl Engine {
@@ -184,7 +186,7 @@ impl Engine {
         let tempo = pattern::DEFAULT_TEMPO;
         let loop_samples = pattern::loop_samples(&pattern, sample_rate, tempo);
         let timbre = Timbre::default();
-        let generator = build_generator(sample_rate, kind, timbre.waveform, false, None);
+        let generator = build_generator(sample_rate, kind.make(), timbre.waveform, false, None);
         let effects: Vec<EffectSlot> = vec![
             EffectSlot {
                 name: "Lowpass",
@@ -218,6 +220,7 @@ impl Engine {
             sample_path: None,
             metronome: false,
             metronome_volume: 0.5,
+            custom_ratios: Vec::new(),
             last_step: usize::MAX, // ensure the first beat ticks too
             click_t: CLICK_LEN,
             click_freq: 1000.0,
@@ -368,14 +371,39 @@ impl Engine {
     }
 
     fn rebuild_generator(&mut self) {
+        let tuning = self.resolved_tuning();
         self.generator = build_generator(
             self.sample_rate,
-            self.tuning_kind,
+            tuning,
             self.timbre.waveform,
             self.using_sample,
             self.sample_path.clone(),
         );
         self.apply_timbre_params();
+    }
+
+    fn resolved_tuning(&self) -> TuningWrapper {
+        crate::tuning::resolve(self.tuning_kind, &self.custom_ratios)
+    }
+
+    /// Steps per octave, honoring the custom scale's size.
+    pub fn tuning_steps(&self) -> i32 {
+        if self.tuning_kind == TuningKind::Custom {
+            self.custom_ratios.len().max(1) as i32
+        } else {
+            self.tuning_kind.steps_per_octave() as i32
+        }
+    }
+
+    pub fn set_custom_ratios(&mut self, ratios: Vec<f32>) {
+        self.custom_ratios = ratios;
+        if self.tuning_kind == TuningKind::Custom {
+            self.rebuild_generator();
+        }
+    }
+
+    pub fn custom_ratios(&self) -> Vec<f32> {
+        self.custom_ratios.clone()
     }
 
     /// Apply the ADSR/gain timbre to whatever the current boxed generator is,

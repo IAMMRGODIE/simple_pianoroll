@@ -24,6 +24,8 @@ use tuning::TuningKind;
 struct PianoRollApp {
     engine: Arc<Mutex<Engine>>,
     editor: EditorState,
+    custom_ratios_input: Vec<f32>,
+    show_custom_window: bool,
 }
 
 impl eframe::App for PianoRollApp {
@@ -41,7 +43,7 @@ impl eframe::App for PianoRollApp {
 
         // Snapshot engine state (brief locks), then the rest runs lock-free.
         let mut pat = self.engine.lock().unwrap().pattern().clone();
-        let spo = self.engine.lock().unwrap().tuning_kind().steps_per_octave() as i32;
+        let spo = self.engine.lock().unwrap().tuning_steps();
         let ph = self.engine.lock().unwrap().playhead_step();
 
         // ---- keyboard shortcuts (work on the local pattern + editor) ----
@@ -115,7 +117,15 @@ impl eframe::App for PianoRollApp {
                     });
                 if kind_changed {
                     self.engine.lock().unwrap().set_tuning(kind);
-                    self.editor.names = pianoroll::default_names(kind.steps_per_octave());
+                    let n = if kind == TuningKind::Custom {
+                        self.custom_ratios_input.len().max(1)
+                    } else {
+                        kind.steps_per_octave()
+                    };
+                    self.editor.names = pianoroll::default_names(n);
+                }
+                if ui.button("Custom…").clicked() {
+                    self.show_custom_window = true;
                 }
 
                 let mut tempo = self.engine.lock().unwrap().tempo();
@@ -340,8 +350,8 @@ impl eframe::App for PianoRollApp {
                     });
                 if self.editor.scheme == pianoroll::Scheme::Custom {
                     // per-degree color editors (capped so the panel stays sane)
-                    let spo = self.engine.lock().unwrap().tuning_kind().steps_per_octave();
-                    let cap = spo.min(24);
+                    let spo = self.engine.lock().unwrap().tuning_steps();
+                    let cap = (spo.min(24)) as usize;
                     while self.editor.custom_colors.len() < cap {
                         self.editor.custom_colors.push([140, 140, 140]);
                     }
@@ -356,7 +366,7 @@ impl eframe::App for PianoRollApp {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label("Root:");
-                    let spo = (self.engine.lock().unwrap().tuning_kind().steps_per_octave() as i32).max(1);
+                    let spo = self.engine.lock().unwrap().tuning_steps().max(1);
                     let mut root = self.editor.tonic;
                     if ui
                         .add(egui::DragValue::new(&mut root).range(0..=spo - 1).speed(1))
@@ -378,8 +388,8 @@ impl eframe::App for PianoRollApp {
                     self.editor.names = nnames;
                 }
                 if ui.button("Reset").clicked() {
-                    let spo = self.engine.lock().unwrap().tuning_kind().steps_per_octave();
-                    self.editor.names = pianoroll::default_names(spo);
+                    let spo = self.engine.lock().unwrap().tuning_steps();
+                    self.editor.names = pianoroll::default_names(spo as usize);
                 }
 
                 if !self.editor.selection.is_empty() {
@@ -512,6 +522,56 @@ impl eframe::App for PianoRollApp {
             pianoroll::show(ui, &mut self.editor, &mut pat, spo, ph, &mut preview_out, &mut seek_out);
         });
 
+        // ---- custom scale editor (separate window) ----
+        if self.show_custom_window {
+            let mut open = true;
+            egui::Window::new("Custom scale (note · ratio to root)")
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    // number of notes per octave
+                    let mut n = self.custom_ratios_input.len() as i32;
+                    if ui
+                        .add(egui::DragValue::new(&mut n).range(1..=128))
+                        .changed()
+                    {
+                        let n = n.clamp(1, 128) as usize;
+                        self.custom_ratios_input.resize(n, 2.0);
+                        if let Some(r) = self.custom_ratios_input.first_mut() {
+                            *r = 1.0; // root ratio is 1.0
+                        }
+                    }
+                    ui.add_space(4.0);
+                    ui.label("Ratios (each note / root):");
+                    ui.horizontal_wrapped(|ui| {
+                        for i in 0..self.custom_ratios_input.len() {
+                            ui.add(
+                                egui::DragValue::new(&mut self.custom_ratios_input[i])
+                                    .speed(0.001)
+                                    .fixed_decimals(4),
+                            );
+                        }
+                    });
+                    ui.add_space(4.0);
+                    if ui.button("Apply tuning").clicked() {
+                        self.engine
+                            .lock()
+                            .unwrap()
+                            .set_custom_ratios(self.custom_ratios_input.clone());
+                        let mut e = self.engine.lock().unwrap();
+                        e.set_tuning(TuningKind::Custom);
+                        let spo = e.tuning_steps() as usize;
+                        drop(e);
+                        self.editor.names = pianoroll::default_names(spo);
+                    }
+                    if ui.button("Close").clicked() {
+                        self.show_custom_window = false;
+                    }
+                });
+            if !open {
+                self.show_custom_window = false;
+            }
+        }
+
         // ---- write the edited pattern back + apply preview/seek (brief lock) ----
         {
             let mut e = self.engine.lock().unwrap();
@@ -546,7 +606,12 @@ fn main() -> eframe::Result<()> {
             editor.active_clip = 0;
             let mut seed = initial.clone();
             editor.begin_edit(&mut seed);
-            Ok(Box::new(PianoRollApp { engine, editor }))
+            Ok(Box::new(PianoRollApp {
+                engine,
+                editor,
+                custom_ratios_input: vec![1.0, 9.0 / 8.0, 5.0 / 4.0, 3.0 / 2.0],
+                show_custom_window: false,
+            }))
         }),
     )
 }

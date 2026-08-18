@@ -23,6 +23,7 @@ pub enum TuningKind {
     Edo53,
     Just,
     Pythagorean,
+    Custom,
 }
 
 impl TuningKind {
@@ -37,6 +38,7 @@ impl TuningKind {
             TuningKind::Edo53,
             TuningKind::Just,
             TuningKind::Pythagorean,
+            TuningKind::Custom,
         ]
     }
 
@@ -51,6 +53,7 @@ impl TuningKind {
             TuningKind::Edo53 => "53-EDO",
             TuningKind::Just => "Just intonation",
             TuningKind::Pythagorean => "Pythagorean",
+            TuningKind::Custom => "Custom scale",
         }
     }
 
@@ -64,6 +67,7 @@ impl TuningKind {
             TuningKind::Edo31 => 31,
             TuningKind::Edo53 => 53,
             TuningKind::Just | TuningKind::Pythagorean => 12,
+            TuningKind::Custom => 0,
         }
     }
 
@@ -77,6 +81,7 @@ impl TuningKind {
             TuningKind::Edo53 => TuningWrapper(Box::new(NEdoTuning::<53>)),
             TuningKind::Just => TuningWrapper(Box::new(JustIntonation)),
             TuningKind::Pythagorean => TuningWrapper(Box::new(PythagoreanTuning)),
+            TuningKind::Custom => TuningWrapper(Box::new(CustomScale { ratios: Vec::new() })),
         }
     }
 }
@@ -87,5 +92,38 @@ pub struct TuningWrapper(Box<dyn Tuning + Send + Sync>);
 impl Tuning for TuningWrapper {
     fn get_frequency(&self, note: f32) -> f32 {
         self.0.get_frequency(note)
+    }
+}
+
+/// A user-defined scale: a list of frequency ratios relative to the root
+/// (ratios[0] == 1.0). `pitch_index 0` is the root (C4 reference).
+#[derive(Debug, Clone)]
+pub struct CustomScale {
+    pub ratios: Vec<f32>,
+}
+
+const C4_FREQ: f32 = 261.62558;
+
+impl Tuning for CustomScale {
+    fn get_frequency(&self, note: f32) -> f32 {
+        let n = self.ratios.len() as i32;
+        if n == 0 {
+            return 0.0;
+        }
+        let steps = (note - REF_NOTE as f32).round() as i32; // = pitch_index
+        let octave = (steps as f64 / n as f64).floor() as i32;
+        let degree = steps.rem_euclid(n) as usize;
+        C4_FREQ * self.ratios[degree] * 2.0f32.powf(octave as f32)
+    }
+}
+
+/// Resolve a `TuningKind` to a concrete tuning, using the custom ratios for
+/// `Custom`.
+pub fn resolve(kind: TuningKind, custom_ratios: &[f32]) -> TuningWrapper {
+    match kind {
+        TuningKind::Custom => TuningWrapper(Box::new(CustomScale {
+            ratios: custom_ratios.to_vec(),
+        })),
+        _ => kind.make(),
     }
 }
