@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, PointerButton, Pos2, Rect, Response, Sense, Stroke, Vec2};
 
-use crate::pattern::{BAR_STEPS, Note, Pattern};
+use crate::pattern::{BAR_STEPS, Note, Pattern, STEPS_PER_BEAT};
 
 const KEY_W: f32 = 58.0;
 const TOP_H: f32 = 26.0;
@@ -66,6 +66,7 @@ pub enum Drag {
         ids: Vec<u64>,
         orig: Vec<(usize, usize)>, // (start, len) per id
         edge: Edge,
+        hit_id: u64,
     },
 }
 
@@ -353,12 +354,24 @@ pub fn show(
         if x < origin.x || x > origin.x + width {
             continue;
         }
-        let is_bar = st % BAR_STEPS as i32 == 0;
+        // Brightness tiers: 16-step bar = brightest, 4-step beat = medium, else faint.
+        let tier = if st.rem_euclid(BAR_STEPS as i32) == 0 {
+            2
+        } else if st.rem_euclid(STEPS_PER_BEAT as i32) == 0 {
+            1
+        } else {
+            0
+        };
+        let (ruler_c, grid_c, w): (Color32, Color32, f32) = match tier {
+            2 => (Color32::from_rgb(150, 150, 170), Color32::from_rgb(78, 78, 92), 1.5),
+            1 => (Color32::from_rgb(110, 110, 130), Color32::from_rgb(60, 60, 74), 1.0),
+            _ => (Color32::from_rgb(60, 60, 72), Color32::from_rgb(46, 46, 54), 0.5),
+        };
         painter.line_segment(
             [Pos2::new(x, origin.y), Pos2::new(x, ui_top)],
-            Stroke::new(1.0, if is_bar { Color32::from_rgb(140, 140, 160) } else { Color32::from_rgb(60, 60, 72) }),
+            Stroke::new(1.0, ruler_c),
         );
-        if is_bar && st >= 0 {
+        if tier == 2 && st >= 0 {
             painter.text(
                 Pos2::new(x + 2.0, origin.y + 2.0),
                 Align2::LEFT_TOP,
@@ -369,10 +382,7 @@ pub fn show(
         }
         painter.line_segment(
             [Pos2::new(x, ui_top), Pos2::new(x, grid_bottom)],
-            Stroke::new(
-                if is_bar { 1.5 } else { 0.5 },
-                if is_bar { Color32::from_rgb(70, 70, 84) } else { Color32::from_rgb(46, 46, 54) },
-            ),
+            Stroke::new(w, grid_c),
         );
     }
 
@@ -640,7 +650,7 @@ pub fn show(
                     .iter()
                     .map(|iid| pat.notes.iter().find(|n| n.id == *iid).map(|n| (n.start_step, n.length_steps)).unwrap_or((0, 1)))
                     .collect();
-                state.drag = Some(Drag::NoteResize { ids: group_ids, orig, edge });
+                state.drag = Some(Drag::NoteResize { ids: group_ids, orig, edge, hit_id: *nid });
             } else if let Some(n) = hit_note {
                 let orig: Vec<(i32, usize)> = group_ids
                     .iter()
@@ -654,6 +664,7 @@ pub fn show(
         if resp.dragged()
             && let Some(delta) = resp.total_drag_delta()
         {
+            let mut resize_len_after: Option<usize> = None;
             match &mut state.drag {
                 Some(Drag::NoteMove { ids, orig, hit_id, last_pitch }) => {
                     let d_pitch = (-delta.y / ROW_H).round() as i32;
@@ -675,7 +686,7 @@ pub fn show(
                         *last_pitch = Some(np);
                     }
                 }
-                Some(Drag::NoteResize { ids, orig, edge }) => {
+                Some(Drag::NoteResize { ids, orig, edge, hit_id }) => {
                     let d = snap_to((delta.x / step_px).round() as i32, snap);
                     let notes_list = &mut pat.notes;
                     for (id, (os, ol)) in ids.iter().zip(orig.iter()) {
@@ -693,8 +704,13 @@ pub fn show(
                             }
                         }
                     }
+                    // sync the click-to-add default length to the resized note
+                    resize_len_after = pat.notes.iter().find(|n| n.id == *hit_id).map(|n| n.length_steps);
                 }
                 _ => {}
+            }
+            if let Some(len) = resize_len_after {
+                state.last_note_len = len;
             }
         }
 

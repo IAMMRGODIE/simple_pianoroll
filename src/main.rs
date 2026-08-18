@@ -23,7 +23,6 @@ use tuning::TuningKind;
 struct PianoRollApp {
     engine: Arc<Mutex<Engine>>,
     editor: EditorState,
-    sample_path_input: String,
 }
 
 impl eframe::App for PianoRollApp {
@@ -274,23 +273,13 @@ impl eframe::App for PianoRollApp {
                 if ui.button("Use generated wave").clicked() {
                     self.engine.lock().unwrap().use_wave();
                 }
-            } else {
-                ui.horizontal(|ui| {
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut self.sample_path_input)
-                            .hint_text("path/to/sample.wav")
-                            .desired_width(150.0),
-                    );
-                    resp.on_hover_text("Absolute path to a WAV file to use as the track sound (resampler).");
-                    if ui.button("Load").clicked() {
-                        let path = std::path::PathBuf::from(self.sample_path_input.trim());
-                        let mut e = self.engine.lock().unwrap();
-                        if !e.load_sample(&path) {
-                            eprintln!("failed to load sample: {}", self.sample_path_input);
-                        }
-                    }
-                });
-            }
+            } else if ui.button("Load sample…").clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Audio", &["wav", "flac", "mp3", "ogg"])
+                    .pick_file()
+                {
+                    self.engine.lock().unwrap().load_sample(&path);
+                }
 
             ui.separator();
             ui.heading("Effects");
@@ -361,11 +350,7 @@ fn main() -> eframe::Result<()> {
             let mut editor = EditorState::default();
             let mut initial = engine.lock().unwrap().pattern().clone();
             editor.begin_edit(&mut initial); // seed the history with the initial state
-            Ok(Box::new(PianoRollApp {
-                engine,
-                editor,
-                sample_path_input: String::new(),
-            }))
+            Ok(Box::new(PianoRollApp { engine, editor }))
         }),
     )
 }
