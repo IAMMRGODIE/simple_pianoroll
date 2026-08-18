@@ -421,8 +421,15 @@ impl Engine {
     pub fn set_playing(&mut self, playing: bool) {
         if !playing && self.playing {
             self.stop_pending = true;
+            self.sample_counter = 0; // return the playhead to the start
         }
         self.playing = playing;
+    }
+
+    /// Jump the transport back to the start of the loop.
+    pub fn rewind(&mut self) {
+        self.sample_counter = 0;
+        self.stop_pending = true;
     }
 
     pub fn tuning_kind(&self) -> TuningKind {

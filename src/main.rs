@@ -33,6 +33,10 @@ impl eframe::App for PianoRollApp {
             let p = !e.playing();
             e.set_playing(p);
         }
+        // Home / W: rewind the transport to the start.
+        if ui.input(|i| i.key_pressed(egui::Key::Home)) {
+            self.engine.lock().unwrap().rewind();
+        }
 
         // Snapshot engine state (brief locks), then the rest runs lock-free.
         let mut pat = self.engine.lock().unwrap().pattern().clone();
@@ -110,6 +114,7 @@ impl eframe::App for PianoRollApp {
                     });
                 if kind_changed {
                     self.engine.lock().unwrap().set_tuning(kind);
+                    self.editor.names = pianoroll::default_names(kind.steps_per_octave());
                 }
 
                 let mut tempo = self.engine.lock().unwrap().tempo();
@@ -124,6 +129,10 @@ impl eframe::App for PianoRollApp {
                 if ui.button(lbl).clicked() {
                     let mut e = self.engine.lock().unwrap();
                     e.set_playing(!playing);
+                }
+                if ui.button("⏮ Stop & Home").clicked() {
+                    let mut e = self.engine.lock().unwrap();
+                    e.set_playing(false);
                 }
 
                 ui.separator();
@@ -187,7 +196,8 @@ impl eframe::App for PianoRollApp {
                     self.editor.names = nnames;
                 }
                 if ui.button("Reset").clicked() {
-                    self.editor.names = "C C# D D# E F F# G G# A A# B".to_string();
+                    let spo = self.engine.lock().unwrap().tuning_kind().steps_per_octave();
+                    self.editor.names = pianoroll::default_names(spo);
                 }
 
                 if !self.editor.selection.is_empty() {

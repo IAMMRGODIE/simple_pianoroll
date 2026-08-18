@@ -228,6 +228,19 @@ fn zoom_at(
     (new_sp, new_left)
 }
 
+/// Default base note names for common EDOs; empty for EDOs that have no
+/// standardized convention (e.g. 53) so they fall back to plain degree numbers.
+pub fn default_names(spo: usize) -> String {
+    match spo {
+        7 => "C D E F G A B".to_string(),
+        12 => "C C# D D# E F F# G G# A A# B".to_string(),
+        19 => "C C♯ C× D D♯ D× E E♯ F F♯ F× G G♯ G× A A♯ A× B B♯".to_string(),
+        24 => "C C↑ C# C#↑ D D↑ D# D#↑ E E↑ F F↑ F# F#↑ G G↑ G# G#↑ A A↑ A# A#↑ B B↑".to_string(),
+        31 => "C C↑ C# Db Db↑ D D↑ D# Eb Eb↑ E Fb E# F F↑ F# Gb Gb↑ G G↑ G# Ab Ab↑ A A↑ A# Bb Bb↑ B Cb B#".to_string(),
+        _ => String::new(),
+    }
+}
+
 fn snap_to(v: i32, snap: usize) -> i32 {
     if snap < 1 {
         return v;
