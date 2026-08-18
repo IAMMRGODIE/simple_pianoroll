@@ -33,7 +33,7 @@ impl eframe::App for PianoRollApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // If a text field (label / name / ratio editor) is focused, don't let
         // the piano-roll shortcuts trigger while the user is typing.
-        let typing = ui.ctx().wants_keyboard_input();
+        let typing = ui.ctx().egui_wants_keyboard_input();
 
         // Space toggles play/pause (brief lock).
         if !typing && ui.input(|i| i.key_pressed(egui::Key::Space)) {
