@@ -90,7 +90,7 @@ struct EffectSlot {
 /// Shared engine state, read/written by the audio callback and the UI thread.
 pub struct Engine {
     tuning_kind: TuningKind,
-    generator: Adsr<OscillatorSmoother<2>, TuningWrapper, 2>,
+    generator: Box<dyn Generator>,
     using_sample: bool,
     sample_path: Option<PathBuf>,
     sample_rate: usize,
@@ -106,67 +106,64 @@ pub struct Engine {
     effects: Vec<EffectSlot>,
 }
 
-/// Build the oscillator for a generated waveform (boxed so it can be swapped
-/// for a loaded sample).
-fn wave_box(wave: Waveform) -> Box<dyn Oscillator<2> + Send + Sync> {
+/// Builder for a single generated waveform (used when no sample is loaded).
+fn wave_adsr(
+    sample_rate: usize,
+    kind: TuningKind,
+    wave: Waveform,
+) -> Adsr<WaveTableSmoother, TuningWrapper, 2> {
     let table: Box<dyn WaveTable + Send + Sync> = match wave {
         Waveform::Sine => Box::new(SineWave),
         Waveform::Triangle => Box::new(TriangleWave),
         Waveform::Saw => Box::new(SawWave),
         Waveform::Square => Box::new(SquareWave),
     };
-    Box::new(WaveTableSmoother::new(vec![table], 0.0))
+    let smoother = WaveTableSmoother::new(vec![table], 0.0);
+    Adsr::new(smoother, kind.make(), sample_rate)
 }
 
-/// Build the generator: its oscillator is either the selected waveform or a
-/// loaded sample (re-loaded from `sample_path`, since `Sampler` isn't Clone).
+/// Build the boxed generator. Like i_am_dsp's demo, the waveform oscillator and
+/// the sampler are each wrapped in their own `Adsr` and boxed as `dyn Generator`,
+/// so the track can switch between "generated wave" and "loaded sample" cleanly.
+/// The sample is re-loaded from `sample_path` (Sampler isn't Clone); when the
+/// file needs resampling we join the background thread and feed via `set_pcm_data`.
 fn build_generator(
     sample_rate: usize,
     kind: TuningKind,
     wave: Waveform,
     using_sample: bool,
     sample_path: Option<PathBuf>,
-) -> Adsr<OscillatorSmoother<2>, TuningWrapper, 2> {
-    let osc: Box<dyn Oscillator<2> + Send + Sync> = if using_sample {
-        match &sample_path {
-            Some(path) => {
-                let mut sm = Sampler::<2>::new(sample_rate);
-                match sm.load_from_file(path) {
-                    Err(e) => {
-                        eprintln!("WARNING: failed to load sample: {e}");
-                        wave_box(wave)
-                    }
-                    Ok(None) => {
-                        // sample rate matched: pcm already set
-                        Box::new(sm)
-                    }
-                    Ok(Some(handle)) => {
-                        // file needs resampling to the engine rate; join the thread,
-                        // take the resampled pcm and hand it to set_pcm_data.
-                        match handle.thread_handle.join() {
-                            Ok(Ok(pcm)) => {
-                                sm.set_pcm_data(pcm);
-                                Box::new(sm)
-                            }
-                            Ok(Err(e)) => {
-                                eprintln!("WARNING: sample resample failed: {e}");
-                                wave_box(wave)
-                            }
-                            Err(_) => {
-                                eprintln!("WARNING: sample resample thread panicked");
-                                wave_box(wave)
-                            }
-                        }
-                    }
+) -> Box<dyn Generator> {
+    if using_sample
+        && let Some(path) = &sample_path {
+            let mut sm = Sampler::<2>::new(sample_rate);
+            let loaded = match sm.load_from_file(path) {
+                Err(e) => {
+                    eprintln!("WARNING: failed to load sample: {e}");
+                    false
                 }
+                Ok(None) => true,
+                Ok(Some(handle)) => match handle.thread_handle.join() {
+                    Ok(Ok(pcm)) => {
+                        sm.set_pcm_data(pcm);
+                        true
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("WARNING: sample resample failed: {e}");
+                        false
+                    }
+                    Err(_) => {
+                        eprintln!("WARNING: sample resample thread panicked");
+                        false
+                    }
+                },
+            };
+            if loaded {
+                return Box::new(Adsr::new(sm, kind.make(), sample_rate));
             }
-            None => wave_box(wave),
+            // fall through to the waveform if the sample failed to load
         }
-    } else {
-        wave_box(wave)
-    };
-    let smoother = OscillatorSmoother::new(vec![osc], 0.0);
-    Adsr::new(smoother, kind.make(), sample_rate)
+    Box::new(wave_adsr(sample_rate, kind, wave))
 }
 
 impl Engine {
@@ -308,23 +305,38 @@ impl Engine {
         self.timbre
     }
 
+    fn rebuild_generator(&mut self) {
+        self.generator = build_generator(
+            self.sample_rate,
+            self.tuning_kind,
+            self.timbre.waveform,
+            self.using_sample,
+            self.sample_path.clone(),
+        );
+        self.apply_timbre_params();
+    }
+
+    /// Apply the ADSR/gain timbre to whatever the current boxed generator is,
+    /// via its parameter interface (we can't reach into a `dyn Generator`).
+    fn apply_timbre_params(&mut self) {
+        let t = self.timbre;
+        let g = &mut self.generator;
+        g.set_parameter("attack_time", SetValue::Float(t.attack));
+        g.set_parameter("hold_time", SetValue::Float(t.hold));
+        g.set_parameter("decay_time", SetValue::Float(t.decay));
+        g.set_parameter("sustain_level", SetValue::Float(t.sustain));
+        g.set_parameter("release_time", SetValue::Float(t.release));
+        g.set_parameter("gain", SetValue::Float(t.gain));
+    }
+
     pub fn set_timbre(&mut self, t: Timbre) {
-        if t.waveform != self.timbre.waveform && !self.using_sample {
-            self.generator = build_generator(
-                self.sample_rate,
-                self.tuning_kind,
-                t.waveform,
-                self.using_sample,
-                self.sample_path.clone(),
-            );
-        }
+        let wave_changed = t.waveform != self.timbre.waveform;
         self.timbre = t;
-        self.generator.attack_time = t.attack;
-        self.generator.hold_time = t.hold;
-        self.generator.decay_time = t.decay;
-        self.generator.sustain_level = t.sustain;
-        self.generator.release_time = t.release;
-        self.generator.gain = t.gain;
+        if wave_changed && !self.using_sample {
+            self.rebuild_generator();
+        } else {
+            self.apply_timbre_params();
+        }
     }
 
     // ---- sample source ----
@@ -336,30 +348,17 @@ impl Engine {
     }
 
     /// Load an audio file as the track's sound source (a resampler/sampler).
-    pub fn load_sample(&mut self, path: impl AsRef<std::path::Path>) -> bool {
+    pub fn load_sample(&mut self, path: impl AsRef<std::path::Path>) {
         let path = path.as_ref().to_path_buf();
         self.sample_path = Some(path);
         self.using_sample = true;
-        self.generator = build_generator(
-            self.sample_rate,
-            self.tuning_kind,
-            self.timbre.waveform,
-            true,
-            self.sample_path.clone(),
-        );
-        true
+        self.rebuild_generator();
     }
 
     /// Switch back to the selected generated waveform.
     pub fn use_wave(&mut self) {
         self.using_sample = false;
-        self.generator = build_generator(
-            self.sample_rate,
-            self.tuning_kind,
-            self.timbre.waveform,
-            false,
-            None,
-        );
+        self.rebuild_generator();
     }
 
     // ---- effects ----
@@ -411,7 +410,7 @@ impl Engine {
             return;
         }
         self.tuning_kind = kind;
-        self.generator = build_generator(self.sample_rate, kind, self.timbre.waveform, self.using_sample, self.sample_path.clone());
+        self.rebuild_generator();
     }
 
     pub fn set_tempo(&mut self, bpm: f32) {
