@@ -225,6 +225,65 @@ impl eframe::App for PianoRollApp {
             });
         });
 
+        // ---- right panel: track (timbre + effect chain) ----
+        egui::Panel::right("track").show(ui, |ui| {
+            ui.heading("Track");
+            ui.add_space(2.0);
+
+            // Timbre
+            let wave_label = |w: audio::Waveform| match w {
+                audio::Waveform::Sine => "Sine",
+                audio::Waveform::Triangle => "Triangle",
+                audio::Waveform::Saw => "Saw",
+                audio::Waveform::Square => "Square",
+            };
+            let mut tb = self.engine.lock().unwrap().timbre();
+            let tb_orig = tb;
+
+            egui::ComboBox::from_label("Wave")
+                .selected_text(wave_label(tb.waveform))
+                .show_ui(ui, |ui| {
+                    for w in [
+                        audio::Waveform::Sine,
+                        audio::Waveform::Triangle,
+                        audio::Waveform::Saw,
+                        audio::Waveform::Square,
+                    ] {
+                        ui.selectable_value(&mut tb.waveform, w, wave_label(w));
+                    }
+                });
+            ui.add(egui::Slider::new(&mut tb.attack, 1.0..=2000.0).text("Attack").logarithmic(true));
+            ui.add(egui::Slider::new(&mut tb.hold, 0.0..=2000.0).text("Hold").logarithmic(true));
+            ui.add(egui::Slider::new(&mut tb.decay, 0.0..=2000.0).text("Decay").logarithmic(true));
+            ui.add(egui::Slider::new(&mut tb.sustain, 0.0..=1.0).text("Sustain"));
+            ui.add(egui::Slider::new(&mut tb.release, 1.0..=2000.0).text("Release").logarithmic(true));
+            ui.add(egui::Slider::new(&mut tb.gain, 0.0..=2.0).text("Gain"));
+            if tb != tb_orig {
+                self.engine.lock().unwrap().set_timbre(tb);
+            }
+
+            ui.separator();
+            ui.heading("Effects");
+            let count = self.engine.lock().unwrap().effect_count();
+            for i in 0..count {
+                let name = self.engine.lock().unwrap().effect_name(i).to_string();
+                let mut on = self.engine.lock().unwrap().effect_on(i);
+                let mut mix = self.engine.lock().unwrap().effect_mix(i);
+                let on0 = on;
+                let mix0 = mix;
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut on, name);
+                    ui.add_enabled(on, egui::Slider::new(&mut mix, 0.0..=1.0).text("mix"));
+                });
+                if on != on0 {
+                    self.engine.lock().unwrap().set_effect_on(i, on);
+                }
+                if mix != mix0 {
+                    self.engine.lock().unwrap().set_effect_mix(i, mix);
+                }
+            }
+        });
+
         // ---- central: status + piano-roll editor (NO engine lock held) ----
         let mut preview_out: Option<i32> = None;
         let mut seek_out: Option<usize> = None;

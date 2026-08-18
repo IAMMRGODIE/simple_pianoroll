@@ -43,6 +43,49 @@ struct PreviewNote {
     remaining: usize,
 }
 
+/// Selectable oscillator waveform for the track's voice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waveform {
+    Sine,
+    Triangle,
+    Saw,
+    Square,
+}
+
+/// Simple single-voice timbre: waveform + ADSR + gain.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Timbre {
+    pub waveform: Waveform,
+    pub attack: f32,
+    pub hold: f32,
+    pub decay: f32,
+    pub sustain: f32,
+    pub release: f32,
+    pub gain: f32,
+}
+
+impl Default for Timbre {
+    fn default() -> Self {
+        Self {
+            waveform: Waveform::Sine,
+            attack: 10.0,
+            hold: 100.0,
+            decay: 100.0,
+            sustain: 1.0,
+            release: 100.0,
+            gain: 0.8,
+        }
+    }
+}
+
+/// One slot in the track's effect chain (enabled + wet amount).
+struct EffectSlot {
+    name: &'static str,
+    on: bool,
+    mix: f32,
+    effect: Box<dyn Effect>,
+}
+
 /// Shared engine state, read/written by the audio callback and the UI thread.
 pub struct Engine {
     tuning_kind: TuningKind,
@@ -56,19 +99,22 @@ pub struct Engine {
     stop_pending: bool,
     preview: Vec<PreviewNote>,
     events_buf: Vec<NoteEvent>,
+    timbre: Timbre,
+    effects: Vec<EffectSlot>,
 }
 
 fn build_generator(
     sample_rate: usize,
     kind: TuningKind,
+    wave: Waveform,
 ) -> Adsr<WaveTableSmoother, TuningWrapper, 2> {
-    let tables: Vec<Box<dyn WaveTable + Send + Sync>> = vec![
-        Box::new(SineWave),
-        Box::new(TriangleWave),
-        Box::new(SawWave),
-        Box::new(SquareWave),
-    ];
-    let smoother = WaveTableSmoother::new(tables, 0.0);
+    let table: Box<dyn WaveTable + Send + Sync> = match wave {
+        Waveform::Sine => Box::new(SineWave),
+        Waveform::Triangle => Box::new(TriangleWave),
+        Waveform::Saw => Box::new(SawWave),
+        Waveform::Square => Box::new(SquareWave),
+    };
+    let smoother = WaveTableSmoother::new(vec![table], 0.0);
     Adsr::new(smoother, kind.make(), sample_rate)
 }
 
@@ -77,9 +123,25 @@ impl Engine {
         let pattern = Pattern::demo();
         let tempo = pattern::DEFAULT_TEMPO;
         let loop_samples = pattern::loop_samples(&pattern, sample_rate, tempo);
+        let timbre = Timbre::default();
+        let generator = build_generator(sample_rate, kind, timbre.waveform);
+        let effects: Vec<EffectSlot> = vec![
+            EffectSlot {
+                name: "Lowpass",
+                on: false,
+                mix: 1.0,
+                effect: Box::new(Lowpass::<2>::new(sample_rate, 2000.0, Biquad::<2>::Q1)),
+            },
+            EffectSlot {
+                name: "Delay",
+                on: false,
+                mix: 0.5,
+                effect: Box::new(Delay::new((), 65536, 80.0, sample_rate)),
+            },
+        ];
         Self {
             tuning_kind: kind,
-            generator: build_generator(sample_rate, kind),
+            generator,
             sample_rate,
             tempo,
             pattern,
@@ -89,6 +151,8 @@ impl Engine {
             stop_pending: false,
             preview: Vec::new(),
             events_buf: Vec::new(),
+            timbre,
+            effects,
         }
     }
 
@@ -167,12 +231,65 @@ impl Engine {
             info,
             events: std::mem::take(&mut self.events_buf),
         });
-        let out = self.generator.generate(&mut ctx);
+        let mut out = self.generator.generate(&mut ctx);
+
+        // single-track effect chain (dry/wet mix per slot)
+        for slot in self.effects.iter_mut() {
+            if slot.on {
+                let dry = out;
+                slot.effect.process(&mut out, &[], &mut ctx);
+                let m = slot.mix;
+                out[0] = dry[0] * (1.0 - m) + out[0] * m;
+                out[1] = dry[1] * (1.0 - m) + out[1] * m;
+            }
+        }
 
         if self.playing {
             self.sample_counter = (self.sample_counter + 1) % self.loop_samples;
         }
         out
+    }
+
+    // ---- timbre ----
+    pub fn timbre(&self) -> Timbre {
+        self.timbre
+    }
+
+    pub fn set_timbre(&mut self, t: Timbre) {
+        if t.waveform != self.timbre.waveform {
+            self.generator = build_generator(self.sample_rate, self.tuning_kind, t.waveform);
+        }
+        self.timbre = t;
+        self.generator.attack_time = t.attack;
+        self.generator.hold_time = t.hold;
+        self.generator.decay_time = t.decay;
+        self.generator.sustain_level = t.sustain;
+        self.generator.release_time = t.release;
+        self.generator.gain = t.gain;
+    }
+
+    // ---- effects ----
+    pub fn effect_count(&self) -> usize {
+        self.effects.len()
+    }
+    pub fn effect_name(&self, i: usize) -> &'static str {
+        self.effects.get(i).map(|s| s.name).unwrap_or("")
+    }
+    pub fn effect_on(&self, i: usize) -> bool {
+        self.effects.get(i).map(|s| s.on).unwrap_or(false)
+    }
+    pub fn effect_mix(&self, i: usize) -> f32 {
+        self.effects.get(i).map(|s| s.mix).unwrap_or(0.0)
+    }
+    pub fn set_effect_on(&mut self, i: usize, on: bool) {
+        if let Some(s) = self.effects.get_mut(i) {
+            s.on = on;
+        }
+    }
+    pub fn set_effect_mix(&mut self, i: usize, mix: f32) {
+        if let Some(s) = self.effects.get_mut(i) {
+            s.mix = mix.clamp(0.0, 1.0);
+        }
     }
 
     /// Play a short preview tone for `pitch_index` (re-triggers on pitch change).
@@ -200,7 +317,7 @@ impl Engine {
             return;
         }
         self.tuning_kind = kind;
-        self.generator = build_generator(self.sample_rate, kind);
+        self.generator = build_generator(self.sample_rate, kind, self.timbre.waveform);
     }
 
     pub fn set_tempo(&mut self, bpm: f32) {
