@@ -114,6 +114,8 @@ pub struct Engine {
     click_t: f32,
     click_freq: f32,
     click_gain: f32,
+    /// Last step for which events were emitted (so we only emit at step entry).
+    sched_step: Option<usize>,
 }
 
 /// Builder for a single generated waveform (used when no sample is loaded).
@@ -220,6 +222,7 @@ impl Engine {
             click_t: CLICK_LEN,
             click_freq: 1000.0,
             click_gain: 0.0,
+            sched_step: None,
         }
     }
 
@@ -229,13 +232,20 @@ impl Engine {
 
         let stop = std::mem::replace(&mut self.stop_pending, false);
         if self.playing {
-            pattern::sample_events_into(
-                &self.pattern,
-                self.sample_rate,
-                self.tempo,
-                self.sample_counter,
-                &mut self.events_buf,
-            );
+            // Emit events only when entering a new step: a NoteOn repeated on
+            // every sample of a step re-triggers the ADSR (resetting count/phase
+            // to 0 -> silent onset), which made notes start one step late.
+            let step = pattern::step_at(self.sample_counter, self.sample_rate, self.tempo);
+            if self.sched_step != Some(step) {
+                pattern::sample_events_into(
+                    &self.pattern,
+                    self.sample_rate,
+                    self.tempo,
+                    self.sample_counter,
+                    &mut self.events_buf,
+                );
+                self.sched_step = Some(step);
+            }
 
             // A note ending exactly at total_steps never gets its NoteOff
             // because step == total_steps never occurs inside the loop; stop
@@ -375,7 +385,6 @@ impl Engine {
         let g = &mut self.generator;
         // Start notes at the wave's peak (phase 0.25) so the onset is immediately
         // audible and lines up with the (instant) metronome tick.
-        g.set_parameter("phase_start", SetValue::Float(0.25));
         g.set_parameter("attack_time", SetValue::Float(t.attack));
         g.set_parameter("hold_time", SetValue::Float(t.hold));
         g.set_parameter("decay_time", SetValue::Float(t.decay));
@@ -480,6 +489,7 @@ impl Engine {
         if playing && !self.playing {
             // remember where the ruler was when playback starts
             self.play_start_pos = self.sample_counter;
+            self.sched_step = None;
         } else if !playing && self.playing {
             self.stop_pending = true;
             // return the ruler to where it was when playback started
@@ -492,6 +502,7 @@ impl Engine {
     pub fn rewind(&mut self) {
         self.sample_counter = 0;
         self.stop_pending = true;
+        self.sched_step = None;
     }
 
     pub fn tuning_kind(&self) -> TuningKind {
