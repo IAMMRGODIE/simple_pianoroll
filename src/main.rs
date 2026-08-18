@@ -217,7 +217,7 @@ impl eframe::App for PianoRollApp {
                             }
                         }
                     });
-                if ui.button("＋ Clip").clicked() {
+                if ui.button("+ Clip").clicked() {
                     let total = pat.total_steps;
                     self.editor.clips.push(pattern::Pattern::empty(total));
                     self.editor.active_clip = self.editor.clips.len() - 1;

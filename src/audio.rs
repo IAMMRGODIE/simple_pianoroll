@@ -196,7 +196,7 @@ impl Engine {
             pattern,
             loop_samples,
             sample_counter: 0,
-            playing: true,
+            playing: false, // do not auto-play on startup
             play_start_pos: 0,
             stop_pending: false,
             preview: Vec::new(),
