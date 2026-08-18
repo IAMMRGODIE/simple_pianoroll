@@ -402,10 +402,6 @@ impl Engine {
         }
     }
 
-    pub fn custom_ratios(&self) -> Vec<f32> {
-        self.custom_ratios.clone()
-    }
-
     /// Apply the ADSR/gain timbre to whatever the current boxed generator is,
     /// via its parameter interface (we can't reach into a `dyn Generator`).
     fn apply_timbre_params(&mut self) {
