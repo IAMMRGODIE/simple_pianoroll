@@ -110,8 +110,9 @@ pub struct EditorState {
     pub clipboard: Vec<Note>,
     erasing: bool,
     erase_prev: Option<Pos2>,
-    /// Step of the alt+right scan line (retriggers preview only on change).
-    scanner_step: Option<usize>,
+    /// Set of note ids the alt+right scan line currently crosses; preview
+    /// retriggers only when this set changes (i.e. the line enters/leaves a note).
+    scanner_crossed: Option<HashSet<u64>>,
     history: Vec<Pattern>,
     history_pos: usize,
 }
@@ -138,7 +139,7 @@ impl Default for EditorState {
             clipboard: Vec::new(),
             erasing: false,
             erase_prev: None,
-            scanner_step: None,
+            scanner_crossed: None,
             history: Vec::new(),
             history_pos: 0,
         }
@@ -624,23 +625,31 @@ pub fn show(
         note_canvas.rect_filled(preview_rect, 3.0, note_color(*pitch, state.tonic, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
     }
 
+    let secondary = ui.input(|i| i.pointer.button_down(PointerButton::Secondary));
+
     // ---- alt + right-drag: vertical scan line at the cursor that previews
     // the notes it crosses (right-drag erase is disabled while alt is held) ----
     if alt && secondary
         && let Some(pos) = hover
     {
         let st = (step_at(pos.x).round() as i32).clamp(0, total_steps - 1);
-        if state.scanner_step != Some(st as usize) {
-            state.scanner_step = Some(st as usize);
+        let crossed: HashSet<u64> = pat
+            .notes
+            .iter()
+            .filter(|n| (n.start_step as i32) <= st && st < (n.start_step + n.length_steps) as i32)
+            .map(|n| n.id)
+            .collect();
+        if state.scanner_crossed.as_ref() != Some(&crossed) {
             let mut pitches: Vec<i32> = pat
                 .notes
                 .iter()
-                .filter(|n| (n.start_step as i32) <= st && st < (n.start_step + n.length_steps) as i32)
+                .filter(|n| crossed.contains(&n.id))
                 .map(|n| n.pitch_index)
                 .collect();
             pitches.sort_unstable();
             pitches.dedup();
             *preview = pitches;
+            state.scanner_crossed = Some(crossed);
         }
         let lx = x_of(st as f32);
         note_canvas.line_segment(
@@ -658,7 +667,6 @@ pub fn show(
 
     // right-button erase-drag: delete every note the cursor swept through since
     // the last frame (a fast drag otherwise skips notes between frames).
-    let secondary = ui.input(|i| i.pointer.button_down(PointerButton::Secondary));
     if secondary && !alt {
         if let Some(pos) = hover
             && in_grid(pos) {
@@ -860,7 +868,7 @@ pub fn show(
                     state.selection = new_sel;
                     if let Some(x) = selected.last() {
                         state.last_note_len = x.length_steps;
-                        *preview = Some(x.pitch_index);
+                        *preview = vec![x.pitch_index];
                     }
                 } else {
                     // shift + click an unselected note -> add it to the selection
@@ -955,7 +963,7 @@ pub fn show(
                     if let Some(np) = new_pitch
                         && *last_pitch != Some(np)
                     {
-                        *preview = Some(np);
+                        *preview = vec![np];
                         *last_pitch = Some(np);
                     }
                 }
