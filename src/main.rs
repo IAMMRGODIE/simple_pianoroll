@@ -417,6 +417,7 @@ impl eframe::App for PianoRollApp {
                                 n.velocity = vel;
                             }
                         }
+                        self.editor.last_velocity = vel;
                     }
 
                     ui.separator();

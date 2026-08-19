@@ -17,6 +17,8 @@ const TOP_H: f32 = 26.0;
 /// Top strip of the ruler: wheel here pans horizontally; below it zooms.
 const RULER_PAN_H: f32 = 9.0;
 const ROW_H: f32 = 13.0;
+/// Height of the velocity lane at the bottom of the piano roll.
+const VEL_LANE_H: f32 = 30.0;
 /// Edge-grab zone (px), shrinks with note width so short notes keep a movable body.
 const EDGE_PX: f32 = 16.0;
 const SCROLL_MIN: f32 = -16.0;
@@ -85,6 +87,8 @@ pub struct EditorState {
     pub selection: HashSet<u64>,
     pub drag: Option<Drag>,
     pub last_note_len: usize,
+    /// Velocity used for newly added notes (like last_note_len for length).
+    pub last_velocity: f32,
     pub step_px: f32,
     pub view_left: f32,
     pub view_top: f32,
@@ -114,6 +118,7 @@ impl Default for EditorState {
             selection: HashSet::new(),
             drag: None,
             last_note_len: BAR_STEPS,
+            last_velocity: 0.8,
             step_px: 16.0,
             view_left: 0.0,
             view_top: 60.0,
@@ -369,6 +374,7 @@ pub fn show(
     let width = bg.rect.width();
     let height = bg.rect.height();
     let grid_bottom = origin.y + height;
+    let rows_bottom = grid_bottom - VEL_LANE_H; // note area stops above the velocity lane
     let rows_visible = ((height - TOP_H) / ROW_H).ceil().max(0.0) as i32;
 
     // ---- input: modifiers & wheel ----
@@ -435,7 +441,7 @@ pub fn show(
     // ---- background rows ----
     for p in (top_pitch - rows_visible - 1..=top_pitch + 1).rev() {
         let y = y_of(p as f32);
-        if y > grid_bottom || y + ROW_H < ui_top {
+        if y > rows_bottom || y + ROW_H < ui_top {
             continue;
         }
         let row_color = if (p - state.tonic).rem_euclid(spo) == 0 {
@@ -494,14 +500,14 @@ pub fn show(
             );
         }
         painter.line_segment(
-            [Pos2::new(x, ui_top), Pos2::new(x, grid_bottom)],
+            [Pos2::new(x, ui_top), Pos2::new(x, rows_bottom)],
             Stroke::new(w, grid_c),
         );
     }
 
     // ---- key column ----
     painter.rect_filled(
-        Rect::from_min_max(Pos2::new(origin.x, ui_top), Pos2::new(ui_left, grid_bottom)),
+        Rect::from_min_max(Pos2::new(origin.x, ui_top), Pos2::new(ui_left, rows_bottom)),
         0.0,
         Color32::from_rgb(20, 20, 25),
     );
@@ -564,7 +570,7 @@ pub fn show(
     // ---- playhead ----
     let px = x_of(playhead_step as f32);
     painter.line_segment(
-        [Pos2::new(px, ui_top), Pos2::new(px, grid_bottom)],
+        [Pos2::new(px, ui_top), Pos2::new(px, rows_bottom)],
         Stroke::new(2.0, Color32::from_rgb(255, 180, 60)),
     );
 
@@ -673,7 +679,7 @@ pub fn show(
                 let s0 = start_step.min(cur_step);
                 let s1 = start_step.max(cur_step);
                 let len = (s1 - s0 + 1).max(1);
-                let id = pat.add_note(pitch, s0, len, 0.8);
+                let id = pat.add_note(pitch, s0, len, state.last_velocity);
                 state.last_note_len = len;
                 state.selection.clear();
                 state.selection.insert(id);
@@ -702,7 +708,7 @@ pub fn show(
         let st = snap_to(step_floor(pos.x), snap);
         let p = pitch_of(pos.y).ceil() as i32;
         state.begin_edit(pat);
-        let id = pat.add_note(p, st.max(0) as usize, state.last_note_len.max(1).min(total_steps as usize), 0.8);
+        let id = pat.add_note(p, st.max(0) as usize, state.last_note_len.max(1).min(total_steps as usize), state.last_velocity);
         if !shift {
             state.selection.clear();
         }
@@ -887,6 +893,57 @@ pub fn show(
             && matches!(state.drag, Some(Drag::NoteMove { .. }) | Some(Drag::NoteResize { .. }))
         {
             state.drag = None;
+        }
+    }
+
+    // ---- velocity lane (bottom) ----
+    let lane_rect = Rect::from_min_max(
+        Pos2::new(ui_left, rows_bottom),
+        Pos2::new(ui_left + width - KEY_W, grid_bottom),
+    );
+    painter.rect_filled(lane_rect, 0.0, Color32::from_rgb(22, 22, 28));
+    let lane_h = (lane_rect.height() - 4.0).max(1.0);
+    for st in first_vis_step..=last_vis_step {
+        let x = x_of(st as f32);
+        if x < origin.x || x > origin.x + width {
+            continue;
+        }
+        let mut maxv = 0.0f32;
+        for n in &pat.notes {
+            if n.start_step == st as usize && n.velocity > maxv {
+                maxv = n.velocity;
+            }
+        }
+        let bh = maxv.clamp(0.0, 1.0) * lane_h;
+        let bw = (step_px - 2.0).max(1.0);
+        painter.rect_filled(
+            Rect::from_min_max(
+                Pos2::new(x + 1.0, lane_rect.bottom() - bh),
+                Pos2::new(x + 1.0 + bw, lane_rect.bottom() - 1.0),
+            ),
+            1.0,
+            Color32::from_rgb(120, 180, 120),
+        );
+    }
+    // drag on the lane sets the velocity of the notes starting at that step
+    let lane_resp = ui.interact(lane_rect, egui::Id::new("pr_vel_lane"), Sense::click_and_drag());
+    if (lane_resp.clicked() || lane_resp.dragged())
+        && let Some(pos) = lane_resp.interact_pointer_pos()
+    {
+        let st = step_floor(pos.x).clamp(0, total_steps - 1);
+        let vel = ((lane_rect.bottom() - 2.0 - pos.y) / lane_h).clamp(0.0, 1.0);
+        if lane_resp.drag_started() {
+            state.begin_edit(pat);
+        }
+        let mut changed = false;
+        for n in pat.notes.iter_mut() {
+            if n.start_step == st as usize {
+                n.velocity = vel;
+                changed = true;
+            }
+        }
+        if changed {
+            state.last_velocity = vel;
         }
     }
 
