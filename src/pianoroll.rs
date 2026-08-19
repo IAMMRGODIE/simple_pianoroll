@@ -640,15 +640,24 @@ pub fn show(
             .map(|n| n.id)
             .collect();
         if state.scanner_crossed.as_ref() != Some(&crossed) {
-            let mut pitches: Vec<i32> = pat
-                .notes
+            // Preview only the notes the line has just ENTERED: notes already
+            // crossed keep ringing, so we never replay them when more join in.
+            let newly: Vec<u64> = crossed
                 .iter()
-                .filter(|n| crossed.contains(&n.id))
-                .map(|n| n.pitch_index)
+                .filter(|id| state.scanner_crossed.as_ref().map_or(true, |o| !o.contains(id)))
+                .cloned()
                 .collect();
-            pitches.sort_unstable();
-            pitches.dedup();
-            *preview = pitches;
+            if !newly.is_empty() {
+                let mut pitches: Vec<i32> = pat
+                    .notes
+                    .iter()
+                    .filter(|n| newly.contains(&n.id))
+                    .map(|n| n.pitch_index)
+                    .collect();
+                pitches.sort_unstable();
+                pitches.dedup();
+                *preview = pitches;
+            }
             state.scanner_crossed = Some(crossed);
         }
         let lx = x_of(st as f32);
@@ -657,7 +666,7 @@ pub fn show(
             Stroke::new(2.0, Color32::from_rgb(130, 225, 255)),
         );
     } else {
-        state.scanner_step = None;
+        state.scanner_crossed = None;
     }
 
     // ===================== interaction =====================
