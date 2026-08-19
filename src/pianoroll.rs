@@ -492,7 +492,7 @@ pub fn show(
         .iter()
         .map(|n| {
             let x0 = x_of(n.start_step as f32);
-            let y0 = y_of(n.pitch_index as f32) + 1.0;
+            let y0 = y_of(n.pitch_index as f32);
             let w = (n.length_steps as f32 * step_px - 1.0).max(1.0);
             (n.id, Rect::from_min_size(Pos2::new(x0, y0), Vec2::new(w, ROW_H - 2.0)))
         })
@@ -543,7 +543,7 @@ pub fn show(
         let s0 = (*start_step).min(*cur_step);
         let s1 = (*start_step).max(*cur_step);
         let preview_rect = Rect::from_min_size(
-            Pos2::new(x_of(s0 as f32), y_of(*pitch as f32) + 1.0),
+            Pos2::new(x_of(s0 as f32), y_of(*pitch as f32)),
             Vec2::new((s1 - s0 + 1) as f32 * step_px - 1.0, ROW_H - 2.0),
         );
         painter.rect_filled(preview_rect, 3.0, note_color(*pitch, state.tonic, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
@@ -653,7 +653,7 @@ pub fn show(
         && let Some(pos) = grid_resp.interact_pointer_pos()
     {
         let st = snap_to(step_floor(pos.x), snap);
-        let p = pitch_of(pos.y).round() as i32;
+        let p = pitch_of(pos.y).floor() as i32;
         state.begin_edit(pat);
         let id = pat.add_note(p, st.max(0) as usize, state.last_note_len.max(1).min(total_steps as usize), 0.8);
         if !shift {
@@ -748,13 +748,32 @@ pub fn show(
                     state.drag = Some(Drag::NoteResize { ids: group_ids, orig, edge, hit_id: *nid });
                 }
                 NoteZone::Body => {
-                    if let Some(n) = pat.notes.iter().find(|x| x.id == *nid).cloned() {
-                        let orig: Vec<(i32, usize)> = group_ids
+                    // shift + body drag = duplicate the selection in place, then move the copies
+                    if shift {
+                        let sel: Vec<Note> = pat
+                            .notes
                             .iter()
-                            .map(|iid| pat.notes.iter().find(|x| x.id == *iid).map(|n| (n.pitch_index, n.start_step)).unwrap_or((0, 0)))
+                            .filter(|x| state.selection.contains(&x.id))
+                            .cloned()
                             .collect();
-                        state.drag = Some(Drag::NoteMove { ids: group_ids, hit_id: n.id, last_pitch: Some(n.pitch_index), orig });
+                        let mut new_sel = HashSet::new();
+                        for x in &sel {
+                            let id = pat.duplicate(x, x.start_step, x.length_steps);
+                            new_sel.insert(id);
+                        }
+                        state.selection = new_sel;
                     }
+                    let mut ids: Vec<u64> = state.selection.iter().cloned().collect();
+                    if !ids.contains(nid) {
+                        ids.push(*nid);
+                    }
+                    let orig: Vec<(i32, usize)> = ids
+                        .iter()
+                        .map(|iid| pat.notes.iter().find(|x| x.id == *iid).map(|n| (n.pitch_index, n.start_step)).unwrap_or((0, 0)))
+                        .collect();
+                    let hit_id = ids.first().copied().unwrap_or(*nid);
+                    let last_pitch = pat.notes.iter().find(|x| x.id == *hit_id).map(|n| n.pitch_index);
+                    state.drag = Some(Drag::NoteMove { ids, orig, hit_id, last_pitch });
                 }
             }
         }
