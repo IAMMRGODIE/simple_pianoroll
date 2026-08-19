@@ -34,6 +34,9 @@ pub struct Project {
     pub active_clip: usize,
     /// Custom scale ratios (note/root), used when tuning == Custom.
     pub custom_ratios: Vec<f32>,
+    /// Whether the loaded sample plays once (no loop).
+    #[serde(default)]
+    pub sample_one_shot: bool,
 }
 
 /// Pretty-print the project as a JSON string.

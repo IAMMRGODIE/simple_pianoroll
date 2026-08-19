@@ -164,6 +164,7 @@ impl eframe::App for PianoRollApp {
                 if ui.button("⏮ Stop & Home").clicked() {
                     let mut e = self.engine.lock().unwrap();
                     e.set_playing(false);
+                    e.rewind();
                 }
 
                 ui.separator();
@@ -485,6 +486,10 @@ impl eframe::App for PianoRollApp {
                 }
                 if ui.button("Use generated wave").clicked() {
                     self.engine.lock().unwrap().use_wave();
+                }
+                let mut one = self.engine.lock().unwrap().sample_one_shot();
+                if ui.checkbox(&mut one, "One shot").on_hover_text("Play the sample once; do not loop it").changed() {
+                    self.engine.lock().unwrap().set_sample_one_shot(one);
                 }
             } else if ui.button("Load sample…").clicked()
                 && let Some(path) = rfd::FileDialog::new()

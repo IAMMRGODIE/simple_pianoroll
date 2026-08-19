@@ -96,6 +96,8 @@ pub struct Engine {
     generator: Box<dyn Generator>,
     using_sample: bool,
     sample_path: Option<PathBuf>,
+    /// One-shot (no loop) playback for the loaded sample.
+    sample_one_shot: bool,
     sample_rate: usize,
     tempo: f32,
     pattern: Pattern,
@@ -147,10 +149,12 @@ fn build_generator(
     wave: Waveform,
     using_sample: bool,
     sample_path: Option<PathBuf>,
+    sample_one_shot: bool,
 ) -> Box<dyn Generator> {
     if using_sample
         && let Some(path) = &sample_path {
             let mut sm = Sampler::<2>::new(sample_rate);
+            sm.one_shot = sample_one_shot;
             let loaded = match sm.load_from_file(path) {
                 Err(e) => {
                     eprintln!("WARNING: failed to load sample: {e}");
@@ -218,6 +222,7 @@ impl Engine {
             effects,
             using_sample: false,
             sample_path: None,
+            sample_one_shot: false,
             metronome: false,
             metronome_volume: 0.5,
             custom_ratios: Vec::new(),
@@ -378,6 +383,7 @@ impl Engine {
             self.timbre.waveform,
             self.using_sample,
             self.sample_path.clone(),
+            self.sample_one_shot,
         );
         self.apply_timbre_params();
     }
@@ -433,6 +439,20 @@ impl Engine {
     }
     pub fn sample_path(&self) -> Option<PathBuf> {
         self.sample_path.clone()
+    }
+    pub fn sample_one_shot(&self) -> bool {
+        self.sample_one_shot
+    }
+
+    /// Toggle one-shot (no-loop) playback of the loaded sample.
+    pub fn set_sample_one_shot(&mut self, on: bool) {
+        if self.sample_one_shot == on {
+            return;
+        }
+        self.sample_one_shot = on;
+        if self.using_sample {
+            self.rebuild_generator();
+        }
     }
 
     /// Load an audio file as the track's sound source (a resampler/sampler).
@@ -574,6 +594,7 @@ impl Engine {
             clip_names: Vec::new(),
             active_clip: 0,
             custom_ratios: self.custom_ratios.clone(),
+            sample_one_shot: self.sample_one_shot,
         }
     }
 
@@ -591,6 +612,7 @@ impl Engine {
             self.set_effect_on(i, es.on);
             self.set_effect_mix(i, es.mix);
         }
+        self.set_sample_one_shot(p.sample_one_shot);
     }
 
 }
