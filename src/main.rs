@@ -110,9 +110,9 @@ impl eframe::App for PianoRollApp {
             } else if mods.command && ev_down {
                 self.editor.transpose(&mut pat, -spo, false, spo);
             } else if mods.shift && ev_up {
-                self.editor.transpose(&mut pat, 1, true, spo);
+                self.editor.transpose(&mut pat, 1, false, spo);
             } else if mods.shift && ev_down {
-                self.editor.transpose(&mut pat, -1, true, spo);
+                self.editor.transpose(&mut pat, -1, false, spo);
             }
         }
 
