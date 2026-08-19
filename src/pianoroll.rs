@@ -809,8 +809,11 @@ pub fn show(
                         }
                         state.selection = new_sel;
                     }
+                    // After duplication the move group holds the *copies* only (the
+                    // original grabbed note must stay put); the earlier drag-start
+                    // group already included the grabbed note for plain (non-shift) moves.
                     let mut ids: Vec<u64> = state.selection.iter().cloned().collect();
-                    if !ids.contains(nid) {
+                    if ids.is_empty() {
                         ids.push(*nid);
                     }
                     let orig: Vec<(i32, usize)> = ids
