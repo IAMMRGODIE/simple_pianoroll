@@ -388,16 +388,18 @@ pub fn show(
         let mut d = Vec2::ZERO;
         let mut wc = false;
         let mut ws = false;
+        let mut wa = false;
         for e in &i.events {
             if let egui::Event::MouseWheel { delta, modifiers, .. } = e {
                 d = *delta;
                 wc = modifiers.command || modifiers.ctrl;
                 ws = modifiers.shift;
+                wa = modifiers.alt;
             }
         }
-        (d, wc, ws)
+        (d, wc, ws, wa)
     });
-    let (scrolled, wheel_ctrl, wheel_shift) = wheel;
+    let (scrolled, wheel_ctrl, wheel_shift, wheel_alt) = wheel;
     let scrolled = scrolled * 16.0;
 
     let hover = ui.input(|i| i.pointer.hover_pos());
@@ -411,7 +413,9 @@ pub fn show(
     let ruler_pan_bottom = origin.y + RULER_PAN_H;
     if let Some(hp) = hover
         && scrolled != Vec2::ZERO {
-            if wheel_shift {
+            if wheel_alt {
+                // alt+wheel over a note adjusts velocity (handled after note rects)
+            } else if wheel_shift {
                 state.view_left += (- scrolled.x - scrolled.y) * 0.10;
             } else if wheel_ctrl {
                 let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32);
@@ -627,6 +631,22 @@ pub fn show(
     } else {
         state.erase_prev = None;
         state.erasing = false;
+    }
+
+    // alt + wheel over a note: adjust that note's velocity (doesn't scroll the grid)
+    if wheel_alt
+        && scrolled != Vec2::ZERO
+    {
+        if let Some(hp) = hover {
+            if let Some((id, r)) = note_rects.iter().find(|(_, r)| r.contains(hp)) {
+                state.begin_edit(pat);
+                if let Some(n) = pat.notes.iter_mut().find(|n| n.id == *id) {
+                    let newv = (n.velocity + scrolled.y * 0.04).clamp(0.0, 1.0);
+                    n.velocity = newv;
+                    state.last_velocity = newv;
+                }
+            }
+        }
     }
 
     // ---- ruler response: seek / scrub ----
