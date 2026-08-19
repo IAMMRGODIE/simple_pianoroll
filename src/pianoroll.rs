@@ -98,6 +98,8 @@ pub struct EditorState {
     /// User-editable palette for the Custom color scheme (RGB per degree).
     pub custom_colors: Vec<[u8; 3]>,
     pub snap: usize,
+    /// Height of the velocity lane (resizable by dragging its top edge).
+    pub vel_lane_h: f32,
     /// User-configurable base note names (space/comma separated), fed to the auto-namer.
     pub names: String,
     /// Multiple clips (patterns); `clips[active_clip]` is the one being edited.
@@ -126,6 +128,7 @@ impl Default for EditorState {
             tonic: 0,
             custom_colors: rainbow_palette(12),
             snap: 1,
+            vel_lane_h: VEL_LANE_H,
             names: "C C# D D# E F F# G G# A A# B".to_string(),
             clips: Vec::new(),
             clip_names: Vec::new(),
@@ -374,7 +377,7 @@ pub fn show(
     let width = bg.rect.width();
     let height = bg.rect.height();
     let grid_bottom = origin.y + height;
-    let rows_bottom = grid_bottom - VEL_LANE_H; // note area stops above the velocity lane
+    let rows_bottom = grid_bottom - state.vel_lane_h; // note area stops above the velocity lane
     let rows_visible = ((height - TOP_H) / ROW_H).ceil().max(0.0) as i32;
 
     // ---- input: modifiers & wheel ----
@@ -902,44 +905,73 @@ pub fn show(
         Pos2::new(ui_left + width - KEY_W, grid_bottom),
     );
     painter.rect_filled(lane_rect, 0.0, Color32::from_rgb(22, 22, 28));
-    let lane_h = (lane_rect.height() - 4.0).max(1.0);
-    for st in first_vis_step..=last_vis_step {
-        let x = x_of(st as f32);
-        if x < origin.x || x > origin.x + width {
+    let lane_h = (state.vel_lane_h - 6.0).max(1.0);
+    let by = grid_bottom - 1.0;
+
+    // per-note bar + a thin line on top reflecting the note's length
+    for n in &pat.notes {
+        let sx = x_of(n.start_step as f32);
+        let ex = x_of((n.start_step + n.length_steps) as f32);
+        if ex + 1.0 < origin.x || sx > origin.x + width {
             continue;
         }
-        let mut maxv = 0.0f32;
-        for n in &pat.notes {
-            if n.start_step == st as usize && n.velocity > maxv {
-                maxv = n.velocity;
-            }
-        }
-        let bh = maxv.clamp(0.0, 1.0) * lane_h;
-        let bw = (step_px - 2.0).max(1.0);
+        let bw = (step_px * 0.5).max(2.0);
+        let vh = n.velocity.clamp(0.0, 1.0) * lane_h;
+        let top = by - vh;
+        let col = if state.selection.contains(&n.id) {
+            Color32::from_rgb(185, 225, 185)
+        } else {
+            Color32::from_rgb(120, 180, 120)
+        };
         painter.rect_filled(
-            Rect::from_min_max(
-                Pos2::new(x + 1.0, lane_rect.bottom() - bh),
-                Pos2::new(x + 1.0 + bw, lane_rect.bottom() - 1.0),
-            ),
+            Rect::from_min_max(Pos2::new(sx + 1.0, top), Pos2::new(sx + 1.0 + bw, by)),
             1.0,
-            Color32::from_rgb(120, 180, 120),
+            col,
+        );
+        let ly = (top - 1.0).max(rows_bottom + 1.0);
+        painter.line_segment(
+            [Pos2::new(sx + 1.0, ly), Pos2::new(ex.max(sx + 1.0), ly)],
+            Stroke::new(1.5, col),
         );
     }
-    // drag on the lane sets the velocity of the notes starting at that step
-    let lane_resp = ui.interact(lane_rect, egui::Id::new("pr_vel_lane"), Sense::click_and_drag());
-    if (lane_resp.clicked() || lane_resp.dragged())
-        && let Some(pos) = lane_resp.interact_pointer_pos()
+
+    // resize handle: drag the lane's top edge to change its height
+    let handle_rect = Rect::from_min_max(
+        Pos2::new(ui_left, rows_bottom - 4.0),
+        Pos2::new(ui_left + width - KEY_W, rows_bottom),
+    );
+    painter.rect_filled(handle_rect, 0.0, Color32::from_rgb(45, 45, 55));
+    let hresp = ui.interact(handle_rect, egui::Id::new("pr_lane_resize"), Sense::click_and_drag());
+    if hresp.dragged()
+        && let Some(pos) = hresp.interact_pointer_pos()
+    {
+        state.vel_lane_h = (grid_bottom - pos.y).clamp(10.0, 120.0);
+    }
+
+    // click/drag the lane body to set velocity (selected notes only if any selected)
+    let lresp = ui.interact(lane_rect, egui::Id::new("pr_vel_lane"), Sense::click_and_drag());
+    if (lresp.clicked() || lresp.dragged())
+        && let Some(pos) = lresp.interact_pointer_pos()
     {
         let st = step_floor(pos.x).clamp(0, total_steps - 1);
-        let vel = ((lane_rect.bottom() - 2.0 - pos.y) / lane_h).clamp(0.0, 1.0);
-        if lane_resp.drag_started() {
+        let vel = ((grid_bottom - 2.0 - pos.y) / lane_h).clamp(0.0, 1.0);
+        if lresp.drag_started() {
             state.begin_edit(pat);
         }
         let mut changed = false;
-        for n in pat.notes.iter_mut() {
-            if n.start_step == st as usize {
-                n.velocity = vel;
-                changed = true;
+        if state.selection.is_empty() {
+            for n in pat.notes.iter_mut() {
+                if n.start_step == st as usize {
+                    n.velocity = vel;
+                    changed = true;
+                }
+            }
+        } else {
+            for n in pat.notes.iter_mut() {
+                if n.start_step == st as usize && state.selection.contains(&n.id) {
+                    n.velocity = vel;
+                    changed = true;
+                }
             }
         }
         if changed {
