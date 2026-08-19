@@ -110,6 +110,8 @@ pub struct EditorState {
     pub clipboard: Vec<Note>,
     erasing: bool,
     erase_prev: Option<Pos2>,
+    /// Step of the alt+right scan line (retriggers preview only on change).
+    scanner_step: Option<usize>,
     history: Vec<Pattern>,
     history_pos: usize,
 }
@@ -136,6 +138,7 @@ impl Default for EditorState {
             clipboard: Vec::new(),
             erasing: false,
             erase_prev: None,
+            scanner_step: None,
             history: Vec::new(),
             history_pos: 0,
         }
@@ -385,7 +388,7 @@ pub fn show(
     pat: &mut Pattern,
     spo: i32,
     playhead_step: usize,
-    preview: &mut Option<i32>,
+    preview: &mut Vec<i32>,
     seek: &mut Option<usize>,
 ) {
     let total_steps = pat.total_steps.max(1) as i32;
@@ -427,6 +430,7 @@ pub fn show(
     let hover = ui.input(|i| i.pointer.hover_pos());
     let shift = ui.input(|i| i.modifiers.shift);
     let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+    let alt = ui.input(|i| i.modifiers.alt);
 
     // Wheel, in priority order:
     //  - shift (on the wheel) -> pan horizontally (ctrl is ignored when shift is held)
@@ -620,6 +624,33 @@ pub fn show(
         note_canvas.rect_filled(preview_rect, 3.0, note_color(*pitch, state.tonic, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
     }
 
+    // ---- alt + right-drag: vertical scan line at the cursor that previews
+    // the notes it crosses (right-drag erase is disabled while alt is held) ----
+    if alt && secondary
+        && let Some(pos) = hover
+    {
+        let st = (step_at(pos.x).round() as i32).clamp(0, total_steps - 1);
+        if state.scanner_step != Some(st as usize) {
+            state.scanner_step = Some(st as usize);
+            let mut pitches: Vec<i32> = pat
+                .notes
+                .iter()
+                .filter(|n| (n.start_step as i32) <= st && st < (n.start_step + n.length_steps) as i32)
+                .map(|n| n.pitch_index)
+                .collect();
+            pitches.sort_unstable();
+            pitches.dedup();
+            *preview = pitches;
+        }
+        let lx = x_of(st as f32);
+        note_canvas.line_segment(
+            [Pos2::new(lx, ui_top), Pos2::new(lx, rows_bottom)],
+            Stroke::new(2.0, Color32::from_rgb(130, 225, 255)),
+        );
+    } else {
+        state.scanner_step = None;
+    }
+
     // ===================== interaction =====================
     let in_grid = |pos: Pos2| grid_rect.contains(pos);
     let pitch_clamp = |p: i32| p.clamp(-2 * spo, 7 * spo);
@@ -628,7 +659,7 @@ pub fn show(
     // right-button erase-drag: delete every note the cursor swept through since
     // the last frame (a fast drag otherwise skips notes between frames).
     let secondary = ui.input(|i| i.pointer.button_down(PointerButton::Secondary));
-    if secondary {
+    if secondary && !alt {
         if let Some(pos) = hover
             && in_grid(pos) {
                 if !state.erasing {
@@ -751,7 +782,7 @@ pub fn show(
                 state.last_note_len = len;
                 state.selection.clear();
                 state.selection.insert(id);
-                *preview = Some(pitch);
+                *preview = vec![pitch];
             }
             Some(Drag::Marquee { start, cur }) => {
                 let m = Rect::from_two_pos(start, cur);
@@ -781,7 +812,7 @@ pub fn show(
             state.selection.clear();
         }
         state.selection.insert(id);
-        *preview = Some(p);
+        *preview = vec![p];
     }
 
     // ---- per-note responses ----

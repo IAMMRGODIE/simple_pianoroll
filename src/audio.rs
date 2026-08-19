@@ -190,7 +190,7 @@ impl Engine {
         let tempo = pattern::DEFAULT_TEMPO;
         let loop_samples = pattern::loop_samples(&pattern, sample_rate, tempo);
         let timbre = Timbre::default();
-        let generator = build_generator(sample_rate, kind.make(), timbre.waveform, false, None);
+        let generator = build_generator(sample_rate, kind.make(), timbre.waveform, false, None, false);
         let effects: Vec<EffectSlot> = vec![
             EffectSlot {
                 name: "Lowpass",

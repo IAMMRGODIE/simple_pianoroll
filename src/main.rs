@@ -522,7 +522,7 @@ impl eframe::App for PianoRollApp {
         });
 
         // ---- central: status + piano-roll editor (NO engine lock held) ----
-        let mut preview_out: Option<i32> = None;
+        let mut preview_out: Vec<i32> = Vec::new();
         let mut seek_out: Option<usize> = None;
         egui::CentralPanel::default().show(ui, |ui| {
             let tempo = self.engine.lock().unwrap().tempo();
@@ -623,8 +623,8 @@ impl eframe::App for PianoRollApp {
             if *e.pattern() != pat {
                 e.set_pattern(pat.clone());
             }
-            if let Some(p) = preview_out {
-                e.preview_note(p);
+            for p in &preview_out {
+                e.preview_note(*p);
             }
             if let Some(s) = seek_out {
                 e.seek_to_step(s);
