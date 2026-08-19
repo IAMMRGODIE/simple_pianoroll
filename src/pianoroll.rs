@@ -772,7 +772,7 @@ pub fn show(
                         .map(|iid| pat.notes.iter().find(|x| x.id == *iid).map(|n| (n.pitch_index, n.start_step)).unwrap_or((0, 0)))
                         .collect();
                     let hit_id = ids.first().copied().unwrap_or(*nid);
-                    let last_pitch = pat.notes.iter().find(|x| x.id == *hit_id).map(|n| n.pitch_index);
+                    let last_pitch = pat.notes.iter().find(|x| x.id == hit_id).map(|n| n.pitch_index);
                     state.drag = Some(Drag::NoteMove { ids, orig, hit_id, last_pitch });
                 }
             }
