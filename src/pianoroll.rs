@@ -634,20 +634,16 @@ pub fn show(
     }
 
     // alt + wheel over a note: adjust that note's velocity (doesn't scroll the grid)
-    if wheel_alt
-        && scrolled != Vec2::ZERO
-    {
-        if let Some(hp) = hover {
-            if let Some((id, r)) = note_rects.iter().find(|(_, r)| r.contains(hp)) {
-                state.begin_edit(pat);
-                if let Some(n) = pat.notes.iter_mut().find(|n| n.id == *id) {
-                    let newv = (n.velocity + scrolled.y * 0.04).clamp(0.0, 1.0);
-                    n.velocity = newv;
-                    state.last_velocity = newv;
-                }
+    if wheel_alt && scrolled != Vec2::ZERO && let Some(hp) = hover 
+        && let Some((id, _)) = note_rects.iter().find(|(_, r)| r.contains(hp)) {
+            state.begin_edit(pat);
+            if let Some(n) = pat.notes.iter_mut().find(|n| n.id == *id) {
+                let newv = (n.velocity + scrolled.y * 0.002).clamp(0.0, 1.0);
+                n.velocity = newv;
+                state.last_velocity = newv;
             }
         }
-    }
+    
 
     // ---- ruler response: seek / scrub ----
     let ruler_resp = ui.interact(ruler_rect, egui::Id::new("pr_ruler"), Sense::click_and_drag());
@@ -965,7 +961,7 @@ pub fn show(
     if hresp.dragged()
         && let Some(pos) = hresp.interact_pointer_pos()
     {
-        state.vel_lane_h = (grid_bottom - pos.y).clamp(10.0, 120.0);
+        state.vel_lane_h = (grid_bottom - pos.y).clamp(10.0, 480.0);
     }
 
     // click/drag the lane body to set velocity (selected notes only if any selected)
