@@ -6,6 +6,8 @@
 //! again to write changes back and request a repaint. That keeps the real-time
 //! audio thread from being starved by the UI.
 
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod audio;
 mod pattern;
 mod pianoroll;
