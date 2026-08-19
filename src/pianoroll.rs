@@ -544,13 +544,14 @@ pub fn show(
             (n.id, Rect::from_min_size(Pos2::new(x0, y0), Vec2::new(w, ROW_H - 2.0)))
         })
         .collect();
+    let note_canvas = painter.with_clip_rect(grid_rect);
     for (n, r) in pat.notes.iter().zip(note_rects.iter().map(|(_, r)| r)) {
         if r.right() < ui_left || r.left() > ui_left + width - KEY_W {
             continue;
         }
         let fill = note_color(n.pitch_index, state.tonic, spo, state.scheme, &state.custom_colors);
-        painter.rect_filled(*r, 3.0, fill.gamma_multiply(0.35 + 0.65 * n.velocity.clamp(0.0, 1.0)));
-        painter.rect_stroke(
+        note_canvas.rect_filled(*r, 3.0, fill.gamma_multiply(0.35 + 0.65 * n.velocity.clamp(0.0, 1.0)));
+        note_canvas.rect_stroke(
             *r,
             3.0,
             Stroke::new(1.0, if state.selection.contains(&n.id) { Color32::WHITE } else { Color32::from_rgb(20, 20, 20) }),
@@ -564,7 +565,7 @@ pub fn show(
                 n.label.clone()
             };
             // left-aligned label, slightly inset from the note's left edge
-            painter.text(
+            note_canvas.text(
                 Pos2::new(r.left() + 3.0, r.center().y),
                 Align2::LEFT_CENTER,
                 text,
@@ -576,7 +577,7 @@ pub fn show(
 
     // ---- playhead ----
     let px = x_of(playhead_step as f32);
-    painter.line_segment(
+    note_canvas.line_segment(
         [Pos2::new(px, ui_top), Pos2::new(px, rows_bottom)],
         Stroke::new(2.0, Color32::from_rgb(255, 180, 60)),
     );
@@ -584,8 +585,8 @@ pub fn show(
     // ---- gesture previews ----
     if let Some(Drag::Marquee { start, cur }) = &state.drag {
         let m = Rect::from_two_pos(*start, *cur);
-        painter.rect_filled(m, 0.0, Color32::from_rgba_unmultiplied(80, 140, 255, 40));
-        painter.rect_stroke(m, 0.0, Stroke::new(1.0, Color32::from_rgb(120, 180, 255)), egui::StrokeKind::Outside);
+        note_canvas.rect_filled(m, 0.0, Color32::from_rgba_unmultiplied(80, 140, 255, 40));
+        note_canvas.rect_stroke(m, 0.0, Stroke::new(1.0, Color32::from_rgb(120, 180, 255)), egui::StrokeKind::Outside);
     }
     if let Some(Drag::Draw { pitch, start_step, cur_step, .. }) = &state.drag {
         let s0 = (*start_step).min(*cur_step);
@@ -594,7 +595,7 @@ pub fn show(
             Pos2::new(x_of(s0 as f32), y_of(*pitch as f32)),
             Vec2::new((s1 - s0 + 1) as f32 * step_px - 1.0, ROW_H - 2.0),
         );
-        painter.rect_filled(preview_rect, 3.0, note_color(*pitch, state.tonic, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
+        note_canvas.rect_filled(preview_rect, 3.0, note_color(*pitch, state.tonic, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
     }
 
     // ===================== interaction =====================
@@ -647,13 +648,12 @@ pub fn show(
         if delta != 0.0 {
             state.begin_edit(pat);
             if state.selection.is_empty() {
-                if let Some((id, _)) = note_rects.iter().find(|(_, r)| r.contains(hp)) {
-                    if let Some(n) = pat.notes.iter_mut().find(|n| n.id == *id) {
+                if let Some((id, _)) = note_rects.iter().find(|(_, r)| r.contains(hp)) 
+                    && let Some(n) = pat.notes.iter_mut().find(|n| n.id == *id) {
                         let newv = (n.velocity + delta).clamp(0.0, 1.0);
                         n.velocity = newv;
                         state.last_velocity = newv;
                     }
-                }
             } else {
                 let sel: Vec<u64> = state.selection.iter().cloned().collect();
                 let mut last: Option<f32> = None;
@@ -951,6 +951,7 @@ pub fn show(
     let lane_h = (state.vel_lane_h - 6.0).max(1.0);
     let by = grid_bottom - 1.0;
 
+    let lane_canvas = painter.with_clip_rect(lane_rect);
     // per-note bar + a thin line on top reflecting the note's length
     for n in &pat.notes {
         let sx = x_of(n.start_step as f32);
@@ -966,13 +967,13 @@ pub fn show(
         } else {
             Color32::from_rgb(120, 180, 120)
         };
-        painter.rect_filled(
+        lane_canvas.rect_filled(
             Rect::from_min_max(Pos2::new(sx + 1.0, top), Pos2::new(sx + 1.0 + bw, by)),
             1.0,
             col,
         );
         let ly = (top - 1.0).max(rows_bottom + 1.0);
-        painter.line_segment(
+        lane_canvas.line_segment(
             [Pos2::new(sx + 1.0, ly), Pos2::new(ex.max(sx + 1.0), ly)],
             Stroke::new(1.5, col),
         );
