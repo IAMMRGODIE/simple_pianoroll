@@ -217,6 +217,28 @@ impl EditorState {
         }
         self.selection = new_sel;
     }
+
+    /// Transpose notes by 'steps' scale-steps: only the selected notes, or the
+    /// whole pattern when nothing is selected ('whole' forces all notes).
+    /// Clamps to the editor's pitch range so nothing scrolls out of the keys.
+    pub fn transpose(&mut self, pat: &mut Pattern, steps: i32, whole: bool, spo: i32) {
+        let ids: HashSet<u64> = if whole || self.selection.is_empty() {
+            pat.notes.iter().map(|n| n.id).collect()
+        } else {
+            self.selection.clone()
+        };
+        if ids.is_empty() {
+            return;
+        }
+        self.begin_edit(pat);
+        let lo = -2 * spo;
+        let hi = 7 * spo;
+        for n in pat.notes.iter_mut() {
+            if ids.contains(&n.id) {
+                n.pitch_index = (n.pitch_index + steps).clamp(lo, hi);
+            }
+        }
+    }
 }
 
 /// HSV (h in [0,1]) -> 8-bit RGB.

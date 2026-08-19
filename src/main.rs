@@ -66,6 +66,9 @@ impl eframe::App for PianoRollApp {
             let ev_y = mods.command && ui.input(|i| i.key_pressed(egui::Key::Y));
             // egui turns Ctrl+A into Event::SelectAll; keep Key::A as a fallback.
             let ev_selall = mods.command && ui.input(|i| i.key_pressed(egui::Key::A));
+            let ev_save = mods.command && ui.input(|i| i.key_pressed(egui::Key::S));
+            let ev_up = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+            let ev_down = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
 
             if ev_copy {
                 self.editor.copy_selected(&pat);
@@ -100,6 +103,16 @@ impl eframe::App for PianoRollApp {
                 }
             } else if ev_y {
                 self.editor.redo(&mut pat);
+            } else if ev_save {
+                self.save_project(&pat);
+            } else if mods.command && ev_up {
+                self.editor.transpose(&mut pat, spo, false, spo);
+            } else if mods.command && ev_down {
+                self.editor.transpose(&mut pat, -spo, false, spo);
+            } else if mods.shift && ev_up {
+                self.editor.transpose(&mut pat, 1, true, spo);
+            } else if mods.shift && ev_down {
+                self.editor.transpose(&mut pat, -1, true, spo);
             }
         }
 
@@ -176,40 +189,9 @@ impl eframe::App for PianoRollApp {
                 }
 
                 ui.separator();
-                if ui.button("💾 Save").clicked()
-                    && let Some(mut path) = rfd::FileDialog::new()
-                        .set_file_name("project.json")
-                        .save_file()
-                    {
-                        // make sure the file gets a .json extension automatically
-                        if path.extension().map(|e| e != "json").unwrap_or(true) {
-                            path.set_extension("json");
-                        }
-                        let mut p = self.engine.lock().unwrap().export_project();
-                        p.note_names = self.editor.names.clone();
-                        p.scheme = self.editor.scheme;
-                        p.snap = self.editor.snap;
-                        p.tonic = self.editor.tonic;
-                        p.custom_ratios = self.custom_ratios_input.clone();
-                        // keep the live edits of the active clip before saving
-                        if !self.editor.clips.is_empty() {
-                            let a = self.editor.active_clip;
-                            if a < self.editor.clips.len() {
-                                self.editor.clips[a] = pat.clone();
-                            }
-                        }
-                        p.clips = self.editor.clips.clone();
-                        p.clip_names = self.editor.clip_names.clone();
-                        p.active_clip = self.editor.active_clip;
-                        match project::to_json(&p) {
-                            Ok(json) => {
-                                if let Err(e) = std::fs::write(&path, json) {
-                                    eprintln!("save failed: {e}");
-                                }
-                            }
-                            Err(e) => eprintln!("could not serialize project: {e}"),
-                        }
-                    }
+                if ui.button("💾 Save").clicked() {
+                    self.save_project(&pat);
+                }
                 if ui.button("📂 Open").clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .add_filter("Project", &["json"])
@@ -644,6 +626,45 @@ impl eframe::App for PianoRollApp {
             }
             if e.playing() {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+            }
+        }
+    }
+}
+
+impl PianoRollApp {
+    /// Save the project via a file dialog (also Ctrl+S).
+    fn save_project(&mut self, pat: &Pattern) {
+        if let Some(mut path) = rfd::FileDialog::new()
+            .set_file_name("project.json")
+            .save_file()
+        {
+            // make sure the file gets a .json extension automatically
+            if path.extension().map(|e| e != "json").unwrap_or(true) {
+                path.set_extension("json");
+            }
+            let mut p = self.engine.lock().unwrap().export_project();
+            p.note_names = self.editor.names.clone();
+            p.scheme = self.editor.scheme;
+            p.snap = self.editor.snap;
+            p.tonic = self.editor.tonic;
+            p.custom_ratios = self.custom_ratios_input.clone();
+            // keep the live edits of the active clip before saving
+            if !self.editor.clips.is_empty() {
+                let a = self.editor.active_clip;
+                if a < self.editor.clips.len() {
+                    self.editor.clips[a] = pat.clone();
+                }
+            }
+            p.clips = self.editor.clips.clone();
+            p.clip_names = self.editor.clip_names.clone();
+            p.active_clip = self.editor.active_clip;
+            match project::to_json(&p) {
+                Ok(json) => {
+                    if let Err(e) = std::fs::write(&path, json) {
+                        eprintln!("save failed: {e}");
+                    }
+                }
+                Err(e) => eprintln!("could not serialize project: {e}"),
             }
         }
     }
