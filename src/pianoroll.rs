@@ -103,6 +103,7 @@ pub struct EditorState {
     pub active_clip: usize,
     pub clipboard: Vec<Note>,
     erasing: bool,
+    erase_prev: Option<Pos2>,
     history: Vec<Pattern>,
     history_pos: usize,
 }
@@ -126,6 +127,7 @@ impl Default for EditorState {
             active_clip: 0,
             clipboard: Vec::new(),
             erasing: false,
+            erase_prev: None,
             history: Vec::new(),
             history_pos: 0,
         }
@@ -305,6 +307,38 @@ pub fn default_names(spo: usize) -> String {
         31 => "C C⬆️ C# Db Db⬆️ D D⬆️ D# Eb Eb⬆️ E Fb E# F F⬆️ F# Gb Gb⬆️ G G⬆️ G# Ab Ab⬆️ A A⬆️ A# Bb Bb⬆️ B Cb B#".to_string(),
         _ => String::new(),
     }
+}
+
+// True if the segment from a to b intersects r (Liang-Barsky).
+fn seg_hits_rect(a: Pos2, b: Pos2, r: Rect) -> bool {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let mut t0 = 0.0f32;
+    let mut t1 = 1.0f32;
+    let p = [-dx, dx, -dy, dy];
+    let q = [a.x - r.min.x, r.max.x - a.x, a.y - r.min.y, r.max.y - a.y];
+    for i in 0..4 {
+        if p[i] == 0.0 {
+            if q[i] < 0.0 {
+                return false;
+            }
+        } else {
+            let t = q[i] / p[i];
+            if p[i] < 0.0 {
+                if t > t1 {
+                    return false;
+                }
+                if t > t0 {
+                    t0 = t;
+                }
+            } else if t < t0 {
+                return false;
+            } else if t < t1 {
+                t1 = t;
+            }
+        }
+    }
+    true
 }
 
 fn snap_to(v: i32, snap: usize) -> i32 {
@@ -554,24 +588,36 @@ pub fn show(
     let pitch_clamp = |p: i32| p.clamp(-2 * spo, 7 * spo);
     let step_floor = |x: f32| step_at(x).floor() as i32;
 
-    // right-button erase-drag
+    // right-button erase-drag: delete every note the cursor swept through since
+    // the last frame (a fast drag otherwise skips notes between frames).
     let secondary = ui.input(|i| i.pointer.button_down(PointerButton::Secondary));
-    if !secondary {
-        state.erasing = false;
-    }
-    if secondary
-        && let Some(pos) = hover
-            && in_grid(pos) && note_rects.iter().any(|(_, r)| r.contains(pos)) {
+    if secondary {
+        if let Some(pos) = hover
+            && in_grid(pos) {
                 if !state.erasing {
                     state.begin_edit(pat);
                     state.erasing = true;
                 }
-                if let Some(idx) = note_rects.iter().position(|(_, r)| r.contains(pos)) {
-                    let rid = note_rects[idx].0;
-                    pat.notes.remove(idx);
-                    state.selection.remove(&rid);
+                if let Some(prev) = state.erase_prev {
+                    let mut remove_ids: Vec<u64> = Vec::new();
+                    for (id, r) in &note_rects {
+                        if seg_hits_rect(prev, pos, *r) {
+                            remove_ids.push(*id);
+                        }
+                    }
+                    for id in remove_ids {
+                        if let Some(idx) = pat.notes.iter().position(|n| n.id == id) {
+                            pat.notes.remove(idx);
+                            state.selection.remove(&id);
+                        }
+                    }
                 }
+                state.erase_prev = Some(pos);
             }
+    } else {
+        state.erase_prev = None;
+        state.erasing = false;
+    }
 
     // ---- ruler response: seek / scrub ----
     let ruler_resp = ui.interact(ruler_rect, egui::Id::new("pr_ruler"), Sense::click_and_drag());
@@ -653,7 +699,7 @@ pub fn show(
         && let Some(pos) = grid_resp.interact_pointer_pos()
     {
         let st = snap_to(step_floor(pos.x), snap);
-        let p = pitch_of(pos.y).floor() as i32;
+        let p = pitch_of(pos.y).ceil() as i32;
         state.begin_edit(pat);
         let id = pat.add_note(p, st.max(0) as usize, state.last_note_len.max(1).min(total_steps as usize), 0.8);
         if !shift {
