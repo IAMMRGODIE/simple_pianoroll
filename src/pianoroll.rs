@@ -633,16 +633,43 @@ pub fn show(
         state.erasing = false;
     }
 
-    // alt + wheel over a note: adjust that note's velocity (doesn't scroll the grid)
-    if wheel_alt && scrolled != Vec2::ZERO && let Some(hp) = hover 
-        && let Some((id, _)) = note_rects.iter().find(|(_, r)| r.contains(hp)) {
+    // alt + wheel: adjust velocity of ALL selected notes (or, if none selected,
+    // the note under the cursor). Doesn't scroll the grid.
+    if wheel_alt
+        && scrolled != Vec2::ZERO
+        && let Some(hp) = hover
+    {
+        let delta = match scrolled.y {
+            y if y > 0.0 => 0.01,
+            y if y < 0.0 => -0.01,
+            _ => 0.0,
+        };
+        if delta != 0.0 {
             state.begin_edit(pat);
-            if let Some(n) = pat.notes.iter_mut().find(|n| n.id == *id) {
-                let newv = (n.velocity + scrolled.y * 0.002).clamp(0.0, 1.0);
-                n.velocity = newv;
-                state.last_velocity = newv;
+            if state.selection.is_empty() {
+                if let Some((id, _)) = note_rects.iter().find(|(_, r)| r.contains(hp)) {
+                    if let Some(n) = pat.notes.iter_mut().find(|n| n.id == *id) {
+                        let newv = (n.velocity + delta).clamp(0.0, 1.0);
+                        n.velocity = newv;
+                        state.last_velocity = newv;
+                    }
+                }
+            } else {
+                let sel: Vec<u64> = state.selection.iter().cloned().collect();
+                let mut last: Option<f32> = None;
+                for n in pat.notes.iter_mut() {
+                    if sel.contains(&n.id) {
+                        let newv = (n.velocity + delta).clamp(0.0, 1.0);
+                        n.velocity = newv;
+                        last = Some(newv);
+                    }
+                }
+                if let Some(v) = last {
+                    state.last_velocity = v;
+                }
             }
         }
+    }
     
 
     // ---- ruler response: seek / scrub ----
