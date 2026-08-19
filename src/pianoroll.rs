@@ -322,10 +322,11 @@ fn zoom_at(
     ui_left: f32,
     scroll_y: f32,
     total: f32,
+    min_step_px: f32,
 ) -> (f32, f32) {
     let cur_step = (view_left + (mx - ui_left) / step_px).clamp(0.0, total);
     let factor = (scroll_y * 0.01).exp();
-    let new_sp = (step_px * factor).clamp(6.0, 64.0);
+    let new_sp = (step_px * factor).clamp(min_step_px, 64.0);
     let new_left = (cur_step - (mx - ui_left) / new_sp).clamp(-1.0, total);
     (new_sp, new_left)
 }
@@ -445,13 +446,13 @@ pub fn show(
             } else if wheel_shift {
                 state.view_left += (- scrolled.x - scrolled.y) * 0.10;
             } else if wheel_ctrl {
-                let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32);
+                let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32, min_step_px);
                 state.step_px = sp;
                 state.view_left = vl;
             } else if hp.y < ruler_pan_bottom {
                 state.view_left += (- scrolled.x - scrolled.y) * 0.10;
             } else if hp.y < ui_top {
-                let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32);
+                let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32, min_step_px);
                 state.step_px = sp;
                 state.view_left = vl;
             } else {
@@ -460,6 +461,9 @@ pub fn show(
             state.view_left = state.view_left.clamp(-2.0, total_steps as f32);
         }
 
+    // Minimum zoom: the whole pattern plus 1/4 extra must fit the grid width
+    // (dynamic, so it follows the panel size / clip length).
+    let min_step_px = (width - KEY_W) / (total_steps as f32 * 1.25);
     let step_px = state.step_px;
     let view_left = state.view_left;
     let view_top = state.view_top;
@@ -644,7 +648,7 @@ pub fn show(
             // crossed keep ringing, so we never replay them when more join in.
             let newly: Vec<u64> = crossed
                 .iter()
-                .filter(|id| state.scanner_crossed.as_ref().map_or(true, |o| !o.contains(id)))
+                .filter(|id| state.scanner_crossed.as_ref().is_none_or(|o| !o.contains(id)))
                 .cloned()
                 .collect();
             if !newly.is_empty() {
