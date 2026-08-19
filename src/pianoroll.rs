@@ -21,8 +21,6 @@ const ROW_H: f32 = 13.0;
 const VEL_LANE_H: f32 = 30.0;
 /// Edge-grab zone (px), shrinks with note width so short notes keep a movable body.
 const EDGE_PX: f32 = 16.0;
-const SCROLL_MIN: f32 = -16.0;
-const SCROLL_MAX: f32 = 90.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Edge {
@@ -235,8 +233,8 @@ impl EditorState {
             return;
         }
         self.begin_edit(pat);
-        let lo = -2 * spo;
-        let hi = 7 * spo;
+        let lo = -6 * spo;
+        let hi = 12 * spo;
         for n in pat.notes.iter_mut() {
             if ids.contains(&n.id) {
                 n.pitch_index = (n.pitch_index + steps).clamp(lo, hi);
@@ -406,6 +404,13 @@ pub fn show(
     let grid_bottom = origin.y + height;
     let rows_bottom = grid_bottom - state.vel_lane_h; // note area stops above the velocity lane
     let rows_visible = ((height - TOP_H) / ROW_H).ceil().max(0.0) as i32;
+    // Minimum zoom: the whole pattern plus 1/4 extra must fit the grid width
+    // (dynamic, so it follows the panel size / clip length).
+    let min_step_px = (width - KEY_W) / (total_steps as f32 * 1.25);
+    // Vertical scroll range in octaves relative to C4 (tuning-aware, so 53-EDO
+    // can still reach notes far above/below the starting point).
+    let scroll_min = -6.0 * spo as f32;
+    let scroll_max = 12.0 * spo as f32;
 
     // ---- input: modifiers & wheel ----
     // Read the raw wheel event(s): egui converts ctrl (and ctrl+shift) wheel
@@ -456,14 +461,11 @@ pub fn show(
                 state.step_px = sp;
                 state.view_left = vl;
             } else {
-                state.view_top = (state.view_top + scrolled.y * 0.15).clamp(SCROLL_MIN, SCROLL_MAX);
+                state.view_top = (state.view_top + scrolled.y * 0.15).clamp(scroll_min, scroll_max);
             }
             state.view_left = state.view_left.clamp(-2.0, total_steps as f32);
         }
 
-    // Minimum zoom: the whole pattern plus 1/4 extra must fit the grid width
-    // (dynamic, so it follows the panel size / clip length).
-    let min_step_px = (width - KEY_W) / (total_steps as f32 * 1.25);
     let step_px = state.step_px;
     let view_left = state.view_left;
     let view_top = state.view_top;
@@ -675,7 +677,7 @@ pub fn show(
 
     // ===================== interaction =====================
     let in_grid = |pos: Pos2| grid_rect.contains(pos);
-    let pitch_clamp = |p: i32| p.clamp(-2 * spo, 7 * spo);
+    let pitch_clamp = |p: i32| p.clamp(-6 * spo, 12 * spo);
     let step_floor = |x: f32| step_at(x).floor() as i32;
 
     // right-button erase-drag: delete every note the cursor swept through since
