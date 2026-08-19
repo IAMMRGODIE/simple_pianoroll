@@ -398,6 +398,28 @@ impl eframe::App for PianoRollApp {
 
                 if !self.editor.selection.is_empty() {
                     ui.separator();
+                    // velocity of the selected notes
+                    let some_id = *self.editor.selection.iter().next().unwrap();
+                    let mut vel = pat
+                        .notes
+                        .iter()
+                        .find(|n| n.id == some_id)
+                        .map(|n| n.velocity)
+                        .unwrap_or(0.8);
+                    let vres = ui.add(egui::Slider::new(&mut vel, 0.0..=1.0).text("Vel"));
+                    if vres.drag_started() {
+                        self.editor.begin_edit(&mut pat);
+                    }
+                    if vres.changed() {
+                        let sel = self.editor.selection.clone();
+                        for id in sel {
+                            if let Some(n) = pat.notes.iter_mut().find(|n| n.id == id) {
+                                n.velocity = vel;
+                            }
+                        }
+                    }
+
+                    ui.separator();
                     ui.label("Note label:");
                     let some_id = *self.editor.selection.iter().next().unwrap();
                     let mut note_label = pat

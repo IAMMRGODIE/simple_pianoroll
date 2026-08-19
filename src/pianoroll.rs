@@ -535,7 +535,8 @@ pub fn show(
         if r.right() < ui_left || r.left() > ui_left + width - KEY_W {
             continue;
         }
-        painter.rect_filled(*r, 3.0, note_color(n.pitch_index, state.tonic, spo, state.scheme, &state.custom_colors));
+        let fill = note_color(n.pitch_index, state.tonic, spo, state.scheme, &state.custom_colors);
+        painter.rect_filled(*r, 3.0, fill.gamma_multiply(0.35 + 0.65 * n.velocity.clamp(0.0, 1.0)));
         painter.rect_stroke(
             *r,
             3.0,
