@@ -2,7 +2,7 @@
 
 一个"简易钢琴窗"小工具：像 FL Studio 那样在网格里编排音符并**实时播放**，但支持**不同的平均律**（12-EDO、19-EDO、24-EDO、31-EDO、53-EDO、纯律、毕达哥拉斯律、自定义比例），用于作曲与调律实验。
 
-基于 Rust + [egui/eframe 0.36](https://github.com/emilk/egui)，音频引擎复用 [i_am_dsp](https://github.com/antoinevg/i_am_dsp) 的 `Adsr` / `Tuning` / 效果器等 DSP 基础设施，通过 `cpal` 实时输出。
+基于 Rust + [egui/eframe 0.36](https://github.com/emilk/egui)，音频引擎复用 [i_am_dsp](https://github.com/iammrgodie/i_am_dsp) 的 `Adsr` / `Tuning` / 效果器等 DSP 基础设施，通过 `cpal` 实时输出。
 
 ## 功能特性
 
