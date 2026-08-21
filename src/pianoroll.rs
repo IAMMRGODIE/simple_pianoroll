@@ -512,30 +512,40 @@ pub fn show(
         Rect::from_min_max(Pos2::new(ui_left, ui_top), Pos2::new(ui_left + width - KEY_W, grid_bottom));
     let spb_i = crate::pattern::steps_per_beat(pat.beat_unit).round() as i32;
     let bar_i = crate::pattern::bar_steps(pat).round() as i32;
+    // Decimate gridlines when zoomed out: keep at least MIN_LINE_GAP px between
+    // adjacent lines so a small step_px doesn't turn into a dense wall of lines
+    // (better looking and much cheaper to draw). Beat/bar lines and the bar
+    // numbers only appear once their on-screen spacing is wide enough.
+    const MIN_LINE_GAP: f32 = 4.0;
+    let faint_stride = ((MIN_LINE_GAP / step_px).ceil() as i32).max(1);
+    let draw_beat = (spb_i as f32 * step_px) >= MIN_LINE_GAP;
+    let draw_bar = (bar_i as f32 * step_px) >= MIN_LINE_GAP;
+    let label_bars = (bar_i as f32 * step_px) >= 30.0;
     for st in first_vis_step..=last_vis_step {
         let x = x_of(st as f32);
         if x < origin.x || x > origin.x + width {
             continue;
         }
         // Brightness tiers: bar lines (per time signature) = brightest,
-        // beat lines (per beat unit) = medium, else faint.
-        let tier = if st.rem_euclid(bar_i) == 0 {
-            2
-        } else if st.rem_euclid(spb_i) == 0 {
-            1
+        // beat lines (per beat unit) = medium, else faint (decimated).
+        let is_bar = draw_bar && st.rem_euclid(bar_i) == 0;
+        let is_beat = !is_bar && draw_beat && st.rem_euclid(spb_i) == 0;
+        let is_faint = !is_bar && !is_beat && st.rem_euclid(faint_stride) == 0;
+        if !is_bar && !is_beat && !is_faint {
+            continue;
+        }
+        let (ruler_c, grid_c, w): (Color32, Color32, f32) = if is_bar {
+            (Color32::from_rgb(150, 150, 170), Color32::from_rgb(78, 78, 92), 1.5)
+        } else if is_beat {
+            (Color32::from_rgb(110, 110, 130), Color32::from_rgb(60, 60, 74), 1.0)
         } else {
-            0
-        };
-        let (ruler_c, grid_c, w): (Color32, Color32, f32) = match tier {
-            2 => (Color32::from_rgb(150, 150, 170), Color32::from_rgb(78, 78, 92), 1.5),
-            1 => (Color32::from_rgb(110, 110, 130), Color32::from_rgb(60, 60, 74), 1.0),
-            _ => (Color32::from_rgb(60, 60, 72), Color32::from_rgb(46, 46, 54), 0.5),
+            (Color32::from_rgb(60, 60, 72), Color32::from_rgb(46, 46, 54), 0.5)
         };
         painter.line_segment(
             [Pos2::new(x, origin.y), Pos2::new(x, ui_top)],
             Stroke::new(1.0, ruler_c),
         );
-        if tier == 2 && st >= 0 {
+        if is_bar && label_bars && st >= 0 {
             painter.text(
                 Pos2::new(x + 2.0, origin.y + 2.0),
                 Align2::LEFT_TOP,
