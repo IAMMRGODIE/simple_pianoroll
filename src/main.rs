@@ -318,12 +318,20 @@ impl eframe::App for PianoRollApp {
         egui::Panel::bottom("edit").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Snap:");
+                let spb = pattern::steps_per_beat(pat.beat_unit);
+                let snap_values = [1.0f64, 2.0, 4.0, 8.0, 16.0, spb / 3.0, spb / 5.0, spb / 7.0];
+                let snap_labels = ["1", "2", "4", "8", "16", "Triplet (3)", "Quintuplet (5)", "Septuplet (7)"];
+                let snap_text = snap_values
+                    .iter()
+                    .position(|v| (*v - self.editor.snap).abs() < 1e-6)
+                    .map(|i| snap_labels[i].to_string())
+                    .unwrap_or_else(|| format!("{:.3}", self.editor.snap));
                 egui::ComboBox::from_id_salt("snap")
-                    .selected_text(format!("{} step{}", self.editor.snap, if self.editor.snap == 1 { "" } else { "s" }))
+                    .selected_text(snap_text)
                     .show_ui(ui, |ui| {
-                        for v in [1usize, 2, 4, 8, 16, pattern::BAR_STEPS] {
-                            if ui.selectable_label(self.editor.snap == v, format!("{v}")).clicked() {
-                                self.editor.snap = v;
+                        for (i, v) in snap_values.iter().enumerate() {
+                            if ui.selectable_label((*v - self.editor.snap).abs() < 1e-6, snap_labels[i]).clicked() {
+                                self.editor.snap = *v;
                             }
                         }
                     });
@@ -336,6 +344,30 @@ impl eframe::App for PianoRollApp {
                 }
                 if slide.changed() {
                     pat.set_len(tlen as usize);
+                }
+                ui.separator();
+                ui.label("Time sig:");
+                let mut beats = pat.beats_per_bar as i32;
+                if ui
+                    .add(egui::DragValue::new(&mut beats).range(1..=16).speed(1))
+                    .changed()
+                {
+                    self.editor.begin_edit(&mut pat);
+                    pat.beats_per_bar = beats.max(1) as u32;
+                }
+                let mut unit = pat.beat_unit;
+                egui::ComboBox::from_id_salt("beat_unit")
+                    .selected_text(format!("{unit}"))
+                    .show_ui(ui, |ui| {
+                        for u in [2u32, 4, 8, 16] {
+                            if ui.selectable_label(unit == u, format!("{u}")).clicked() {
+                                unit = u;
+                            }
+                        }
+                    });
+                if unit != pat.beat_unit {
+                    self.editor.begin_edit(&mut pat);
+                    pat.beat_unit = unit;
                 }
                 ui.separator();
                 ui.label("Color:");
@@ -523,7 +555,7 @@ impl eframe::App for PianoRollApp {
 
         // ---- central: status + piano-roll editor (NO engine lock held) ----
         let mut preview_out: Vec<i32> = Vec::new();
-        let mut seek_out: Option<usize> = None;
+        let mut seek_out: Option<f64> = None;
         egui::CentralPanel::default().show(ui, |ui| {
             let tempo = self.engine_guard().tempo();
             ui.label(format!(

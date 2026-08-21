@@ -28,7 +28,7 @@ pub struct Project {
     pub note_names: String,
     pub tonic: i32,
     pub scheme: Scheme,
-    pub snap: usize,
+    pub snap: f64,
     pub clips: Vec<Pattern>,
     pub clip_names: Vec<String>,
     pub active_clip: usize,

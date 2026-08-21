@@ -114,12 +114,15 @@ pub struct Engine {
     metronome_volume: f32,
     /// User ratios for the Custom scale (relative to root).
     custom_ratios: Vec<f32>,
-    last_step: usize,
+    /// Sorted (sample, event) schedule for the current pattern/loop.
+    events: Vec<(usize, NoteEvent)>,
+    /// Index of the next un-fired event in 'events'.
+    events_pos: usize,
+    /// Last metronome beat index (for beat-crossing detection).
+    last_beat: usize,
     click_t: f32,
     click_freq: f32,
     click_gain: f32,
-    /// Last step for which events were emitted (so we only emit at step entry).
-    sched_step: Option<usize>,
 }
 
 /// Builder for a single generated waveform (used when no sample is loaded).
@@ -205,7 +208,7 @@ impl Engine {
                 effect: Box::new(Delay::new((), 65536, 80.0, sample_rate)),
             },
         ];
-        Self {
+        let mut e = Self {
             tuning_kind: kind,
             generator,
             sample_rate,
@@ -226,12 +229,15 @@ impl Engine {
             metronome: false,
             metronome_volume: 0.5,
             custom_ratios: Vec::new(),
-            last_step: usize::MAX, // ensure the first beat ticks too
+            events: Vec::new(),
+            events_pos: 0,
+            last_beat: usize::MAX, // ensure the first beat ticks too
             click_t: CLICK_LEN,
             click_freq: 1000.0,
             click_gain: 0.0,
-            sched_step: None,
-        }
+        };
+        e.rebuild_events();
+        e
     }
 
     /// Advance one sample and return the stereo output.
@@ -240,36 +246,15 @@ impl Engine {
 
         let stop = std::mem::replace(&mut self.stop_pending, false);
         if self.playing {
-            // Emit events only when entering a new step: a NoteOn repeated on
-            // every sample of a step re-triggers the ADSR (resetting count/phase
-            // to 0 -> silent onset), which made notes start one step late.
-            let step = pattern::step_at(self.sample_counter, self.sample_rate, self.tempo);
-            if self.sched_step != Some(step) {
-                pattern::sample_events_into(
-                    &self.pattern,
-                    self.sample_rate,
-                    self.tempo,
-                    self.sample_counter,
-                    &mut self.events_buf,
-                );
-                self.sched_step = Some(step);
-            }
-
-            // A note ending exactly at total_steps never gets its NoteOff
-            // because step == total_steps never occurs inside the loop; stop
-            // such notes on the last sample so they don't sustain past the wrap.
-            if self.sample_counter + 1 == self.loop_samples {
-                for n in &self.pattern.notes {
-                    if n.start_step + n.length_steps == self.pattern.total_steps {
-                        let note = (REF_NOTE + n.pitch_index).max(0) as usize;
-                        self.events_buf.push(NoteEvent::NoteOff {
-                            time: self.sample_counter,
-                            channel: 0,
-                            note,
-                            velocity: n.velocity,
-                        });
-                    }
-                }
+            // Emit events whose sample has arrived. The schedule is a sorted
+            // (sample, event) list rebuilt whenever the pattern/tempo changes,
+            // so fractional tuplet positions play at their exact sample.
+            while self.events_pos < self.events.len()
+                && self.events[self.events_pos].0 <= self.sample_counter
+            {
+                let (_, ev) = self.events[self.events_pos].clone();
+                self.events_buf.push(ev);
+                self.events_pos += 1;
             }
         }
         if stop {
@@ -329,16 +314,19 @@ impl Engine {
             }
         }
 
-        // metronome: tick on each beat (stronger+higher on the bar downbeat)
+        // metronome: tick on each beat (stronger+higher on the bar downbeat),
+        // honoring the pattern's time signature.
         if self.playing && self.metronome {
-            let step = pattern::step_at(self.sample_counter, self.sample_rate, self.tempo);
-            if step != self.last_step && step.is_multiple_of(pattern::STEPS_PER_BEAT) {
-                let bar = step.is_multiple_of(pattern::BAR_STEPS);
+            let sps = pattern::samples_per_step(self.sample_rate, self.tempo);
+            let spb = pattern::steps_per_beat(self.pattern.beat_unit);
+            let beat = (self.sample_counter as f64 / sps / spb).floor() as usize;
+            if beat != self.last_beat {
+                self.last_beat = beat;
+                let bar = beat % self.pattern.beats_per_bar.max(1) as usize == 0;
                 self.click_t = 0.0;
                 self.click_freq = if bar { 2000.0 } else { 1000.0 };
                 self.click_gain = self.metronome_volume * if bar { 1.0 } else { 0.5 };
             }
-            self.last_step = step;
             if self.click_t < CLICK_LEN {
                 let n = self.click_t;
                 let env = (1.0 - n / CLICK_LEN).powi(2);
@@ -352,6 +340,9 @@ impl Engine {
 
         if self.playing {
             self.sample_counter = (self.sample_counter + 1) % self.loop_samples;
+            if self.sample_counter == 0 {
+                self.events_pos = 0; // the schedule repeats each loop
+            }
         }
         out
     }
@@ -509,10 +500,11 @@ impl Engine {
         });
     }
 
-    /// Jump the transport to the given grid step.
-    pub fn seek_to_step(&mut self, step: usize) {
+    /// Jump the transport to the given grid step (may be fractional).
+    pub fn seek_to_step(&mut self, step: f64) {
         self.sample_counter = pattern::sample_of_step(step, self.sample_rate, self.tempo)
             % self.loop_samples;
+        self.events_pos = self.events.partition_point(|(s, _)| *s < self.sample_counter);
         // While playing, a manual reposition (ruler click/drag) re-anchors the
         // stop position so Stop returns to where the playhead now sits.
         if self.playing {
@@ -532,13 +524,14 @@ impl Engine {
     pub fn set_tempo(&mut self, bpm: f32) {
         self.tempo = bpm.max(1.0); // keep loop_samples well-defined
         self.loop_samples = pattern::loop_samples(&self.pattern, self.sample_rate, bpm);
+        self.rebuild_events();
     }
 
     pub fn set_playing(&mut self, playing: bool) {
         if playing && !self.playing {
             // remember where the ruler was when playback starts
             self.play_start_pos = self.sample_counter;
-            self.sched_step = None;
+            self.events_pos = self.events.partition_point(|(s, _)| *s < self.sample_counter);
         } else if !playing && self.playing {
             self.stop_pending = true;
             // return the ruler to where it was when playback started
@@ -556,7 +549,7 @@ impl Engine {
             self.play_start_pos = 0;
         }
         self.stop_pending = true;
-        self.sched_step = None;
+        self.events_pos = 0;
     }
 
     pub fn tuning_kind(&self) -> TuningKind {
@@ -576,11 +569,23 @@ impl Engine {
     pub fn set_pattern(&mut self, p: Pattern) {
         self.loop_samples = pattern::loop_samples(&p, self.sample_rate, self.tempo);
         self.pattern = p;
+        self.rebuild_events();
     }
-    /// The grid step the playhead is currently on (for the transport line).
-    pub fn playhead_step(&self) -> usize {
-        pattern::step_at(self.sample_counter, self.sample_rate, self.tempo)
-            % self.pattern.total_steps.max(1)
+    /// The grid step (fractional, tuplet-aware) the playhead is currently on.
+    pub fn playhead_step(&self) -> f64 {
+        self.sample_counter as f64 / pattern::samples_per_step(self.sample_rate, self.tempo)
+    }
+
+    /// Rebuild the sorted event schedule for the current pattern/loop and
+    /// re-point the cursor at the first event not yet passed.
+    fn rebuild_events(&mut self) {
+        self.events = pattern::build_events(
+            &self.pattern,
+            self.sample_rate,
+            self.tempo,
+            self.loop_samples,
+        );
+        self.events_pos = self.events.partition_point(|(s, _)| *s < self.sample_counter);
     }
     // ---- project save/load ----
     /// Snapshot the current project state.
@@ -599,7 +604,7 @@ impl Engine {
             note_names: String::new(),
             tonic: 0,
             scheme: crate::pianoroll::Scheme::ByPitchClass,
-            snap: 1,
+            snap: 1.0,
             clips: Vec::new(),
             clip_names: Vec::new(),
             active_clip: 0,

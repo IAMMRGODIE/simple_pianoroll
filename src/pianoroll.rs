@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, PointerButton, Pos2, Rect, Response, Sense, Stroke, Vec2};
 
-use crate::pattern::{BAR_STEPS, Note, Pattern, STEPS_PER_BEAT};
+use crate::pattern::{Note, Pattern};
 
 const KEY_W: f32 = 58.0;
 const TOP_H: f32 = 26.0;
@@ -61,20 +61,20 @@ impl Scheme {
 /// Active gesture state (persisted on the App between frames).
 pub enum Drag {
     /// shift+drag on empty: draw a long note (committed on drag_stopped).
-    Draw { pitch: i32, start_step: usize, cur_step: usize },
+    Draw { pitch: i32, start_step: f64, cur_step: f64 },
     /// ctrl+drag: rubber-band selection (toggles).
     Marquee { start: Pos2, cur: Pos2 },
     /// dragging a note body: move the selection group.
     NoteMove {
         ids: Vec<u64>,
-        orig: Vec<(i32, usize)>, // (pitch, start) per id
+        orig: Vec<(i32, f64)>, // (pitch, start) per id
         hit_id: u64,
         last_pitch: Option<i32>,
     },
     /// dragging a note edge: resize the selection group.
     NoteResize {
         ids: Vec<u64>,
-        orig: Vec<(usize, usize)>, // (start, len) per id
+        orig: Vec<(f64, f64)>, // (start, len) per id
         edge: Edge,
         hit_id: u64,
     },
@@ -84,7 +84,7 @@ pub enum Drag {
 pub struct EditorState {
     pub selection: HashSet<u64>,
     pub drag: Option<Drag>,
-    pub last_note_len: usize,
+    pub last_note_len: f64,
     /// Velocity used for newly added notes (like last_note_len for length).
     pub last_velocity: f32,
     pub step_px: f32,
@@ -95,7 +95,7 @@ pub struct EditorState {
     pub tonic: i32,
     /// User-editable palette for the Custom color scheme (RGB per degree).
     pub custom_colors: Vec<[u8; 3]>,
-    pub snap: usize,
+    pub snap: f64,
     /// Height of the velocity lane (resizable by dragging its top edge).
     pub vel_lane_h: f32,
     /// User-configurable base note names (space/comma separated), fed to the auto-namer.
@@ -120,7 +120,7 @@ impl Default for EditorState {
         Self {
             selection: HashSet::new(),
             drag: None,
-            last_note_len: BAR_STEPS,
+            last_note_len: 16.0, // one bar at the base grid
             last_velocity: 0.8,
             step_px: 16.0,
             view_left: 0.0,
@@ -128,7 +128,7 @@ impl Default for EditorState {
             scheme: Scheme::ByPitchClass,
             tonic: 0,
             custom_colors: rainbow_palette(12),
-            snap: 1,
+            snap: 1.0,
             vel_lane_h: VEL_LANE_H,
             names: "C C# D D# E F F# G G# A A# B".to_string(),
             clips: Vec::new(),
@@ -177,18 +177,17 @@ impl EditorState {
     }
 
     /// Paste the clipboard so its first note starts at the playhead.
-    pub fn paste_at_playhead(&mut self, pat: &mut Pattern, ph: usize) {
+    pub fn paste_at_playhead(&mut self, pat: &mut Pattern, ph: f64) {
         if self.clipboard.is_empty() {
             return;
         }
         self.begin_edit(pat);
         let clip = self.clipboard.clone();
-        let min_s = clip.iter().map(|n| n.start_step).min().unwrap_or(0);
-        let off = ph as i64 - min_s as i64;
-        let total = pat.total_steps as i64;
+        let min_s = clip.iter().map(|n| n.start_step).fold(f64::INFINITY, f64::min);
+        let off = ph - min_s;
         let mut new_sel = HashSet::new();
         for n in &clip {
-            let ns = (n.start_step as i64 + off).clamp(0, (total - 1).max(0)) as usize;
+            let ns = (n.start_step + off).max(0.0); // may extend past the clip
             let id = pat.duplicate(n, ns, n.length_steps);
             new_sel.insert(id);
         }
@@ -205,15 +204,14 @@ impl EditorState {
         if selected.is_empty() {
             return;
         }
-        let total = pat.total_steps;
         // Place the copies right after the selected segment (not after the first note):
         // shift the whole block by (max_end - min_start).
-        let min_start = selected.iter().map(|n| n.start_step).min().unwrap_or(0);
-        let max_end = selected.iter().map(|n| n.start_step + n.length_steps).max().unwrap_or(0);
+        let min_start = selected.iter().map(|n| n.start_step).fold(f64::INFINITY, f64::min);
+        let max_end = selected.iter().map(|n| n.start_step + n.length_steps).fold(f64::NEG_INFINITY, f64::max);
         let block = max_end - min_start;
         let mut new_sel = HashSet::new();
         for n in &selected {
-            let ns = (n.start_step + block).min(total.saturating_sub(1));
+            let ns = n.start_step + block; // may extend past the clip
             let id = pat.duplicate(n, ns, n.length_steps);
             new_sel.insert(id);
         }
@@ -374,11 +372,11 @@ fn seg_hits_rect(a: Pos2, b: Pos2, r: Rect) -> bool {
     true
 }
 
-fn snap_to(v: i32, snap: usize) -> i32 {
-    if snap < 1 {
+fn snap_to(v: f64, snap: f64) -> f64 {
+    if snap <= 0.0 {
         return v;
     }
-    ((v as f32 / snap as f32).round() as i32) * snap as i32
+    (v / snap).round() * snap
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -387,11 +385,11 @@ pub fn show(
     state: &mut EditorState,
     pat: &mut Pattern,
     spo: i32,
-    playhead_step: usize,
+    playhead_step: f64,
     preview: &mut Vec<i32>,
-    seek: &mut Option<usize>,
+    seek: &mut Option<f64>,
 ) {
-    let total_steps = pat.total_steps.max(1) as i32;
+    let total_steps = pat.total_steps.max(1) as f64;
     let snap = state.snap;
 
     let size = ui.available_size();
@@ -471,12 +469,12 @@ pub fn show(
     let view_top = state.view_top;
 
     let x_of = |s: f32| ui_left + (s - view_left) * step_px;
-    let step_at = |x: f32| view_left + (x - ui_left) / step_px;
+    let step_at = |x: f32| (view_left + (x - ui_left) / step_px) as f64;
     let y_of = |p: f32| ui_top + (view_top - p) * ROW_H;
     let pitch_of = |y: f32| view_top - (y - ui_top) / ROW_H;
     let top_pitch = view_top.ceil() as i32;
     let first_vis_step = (step_at(ui_left).floor() as i32).max(-1);
-    let last_vis_step = (step_at(ui_left + width).ceil() as i32).min(total_steps) + 1;
+    let last_vis_step = (step_at(ui_left + width).ceil() as i32).min(total_steps as i32) + 1;
 
     // ---- background rows ----
     for p in (top_pitch - rows_visible - 1..=top_pitch + 1).rev() {
@@ -508,15 +506,18 @@ pub fn show(
     );
     let grid_rect =
         Rect::from_min_max(Pos2::new(ui_left, ui_top), Pos2::new(ui_left + width - KEY_W, grid_bottom));
+    let spb_i = crate::pattern::steps_per_beat(pat.beat_unit).round() as i32;
+    let bar_i = crate::pattern::bar_steps(pat).round() as i32;
     for st in first_vis_step..=last_vis_step {
         let x = x_of(st as f32);
         if x < origin.x || x > origin.x + width {
             continue;
         }
-        // Brightness tiers: 16-step bar = brightest, 4-step beat = medium, else faint.
-        let tier = if st.rem_euclid(BAR_STEPS as i32) == 0 {
+        // Brightness tiers: bar lines (per time signature) = brightest,
+        // beat lines (per beat unit) = medium, else faint.
+        let tier = if st.rem_euclid(bar_i) == 0 {
             2
-        } else if st.rem_euclid(STEPS_PER_BEAT as i32) == 0 {
+        } else if st.rem_euclid(spb_i) == 0 {
             1
         } else {
             0
@@ -534,7 +535,7 @@ pub fn show(
             painter.text(
                 Pos2::new(x + 2.0, origin.y + 2.0),
                 Align2::LEFT_TOP,
-                format!("{st}"),
+                format!("{}", st.div_euclid(bar_i) + 1),
                 egui::FontId::proportional(9.0),
                 Color32::from_rgb(180, 180, 190),
             );
@@ -626,7 +627,7 @@ pub fn show(
         let s1 = (*start_step).max(*cur_step);
         let preview_rect = Rect::from_min_size(
             Pos2::new(x_of(s0 as f32), y_of(*pitch as f32)),
-            Vec2::new((s1 - s0 + 1) as f32 * step_px - 1.0, ROW_H - 2.0),
+            Vec2::new((s1 - s0 + 1.0) as f32 * step_px - 1.0, ROW_H - 2.0),
         );
         note_canvas.rect_filled(preview_rect, 3.0, note_color(*pitch, state.tonic, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
     }
@@ -638,11 +639,11 @@ pub fn show(
     if alt && secondary
         && let Some(pos) = hover
     {
-        let st = (step_at(pos.x).round() as i32).clamp(0, total_steps - 1);
+        let st = step_at(pos.x).clamp(0.0, total_steps);
         let crossed: HashSet<u64> = pat
             .notes
             .iter()
-            .filter(|n| (n.start_step as i32) <= st && st < (n.start_step + n.length_steps) as i32)
+            .filter(|n| n.start_step <= st && st < n.start_step + n.length_steps)
             .map(|n| n.id)
             .collect();
         if state.scanner_crossed.as_ref() != Some(&crossed) {
@@ -678,7 +679,6 @@ pub fn show(
     // ===================== interaction =====================
     let in_grid = |pos: Pos2| grid_rect.contains(pos);
     let pitch_clamp = |p: i32| p.clamp(-6 * spo, 12 * spo);
-    let step_floor = |x: f32| step_at(x).floor() as i32;
 
     // right-button erase-drag: delete every note the cursor swept through since
     // the last frame (a fast drag otherwise skips notes between frames).
@@ -753,7 +753,7 @@ pub fn show(
     if (ruler_resp.clicked() || ruler_resp.dragged())
         && let Some(pos) = ruler_resp.interact_pointer_pos()
     {
-        let st = step_floor(pos.x).clamp(0, total_steps - 1).max(0) as usize;
+        let st = step_at(pos.x).clamp(0.0, total_steps);
         *seek = Some(st);
     }
 
@@ -762,7 +762,7 @@ pub fn show(
     if grid_resp.drag_started()
         && let Some(p0) = grid_resp.interact_pointer_pos()
     {
-        let cell = (pitch_of(p0.y).round() as i32, step_floor(p0.x));
+        let cell = (pitch_of(p0.y).round() as i32, step_at(p0.x));
         if ctrl {
             // ctrl+drag = marquee; clear any existing selection first (unless
             // shift is held, which keeps/merges the selection).
@@ -775,8 +775,8 @@ pub fn show(
             state.begin_edit(pat);
             state.drag = Some(Drag::Draw {
                 pitch: pitch_clamp(cell.0),
-                start_step: ((snap_to(cell.1, snap)).max(0)) as usize,
-                cur_step: ((snap_to(cell.1, snap)).max(0)) as usize,
+                start_step: (snap_to(cell.1, snap)).max(0.0),
+                cur_step: (snap_to(cell.1, snap)).max(0.0),
             });
         }
     }
@@ -785,9 +785,9 @@ pub fn show(
     {
         match &mut state.drag {
             Some(Drag::Draw { start_step, cur_step, .. }) => {
-                let ns = snap_to(step_floor(pos.x), snap).max(0);
-                *cur_step = ns.max(0) as usize;
-                *start_step = (*start_step as i32).min(ns) as usize;
+                let ns = snap_to(step_at(pos.x), snap).max(0.0);
+                *cur_step = ns;
+                *start_step = (*start_step).min(ns);
             }
             Some(Drag::Marquee { cur, .. }) => {
                 *cur = pos;
@@ -800,7 +800,7 @@ pub fn show(
             Some(Drag::Draw { pitch, start_step, cur_step, .. }) => {
                 let s0 = start_step.min(cur_step);
                 let s1 = start_step.max(cur_step);
-                let len = (s1 - s0 + 1).max(1);
+                let len = (s1 - s0 + 1.0).max(1.0);
                 let id = pat.add_note(pitch, s0, len, state.last_velocity);
                 state.last_note_len = len;
                 state.selection.clear();
@@ -827,10 +827,10 @@ pub fn show(
     if grid_resp.clicked()
         && let Some(pos) = grid_resp.interact_pointer_pos()
     {
-        let st = snap_to(step_floor(pos.x), snap);
+        let st = snap_to(step_at(pos.x), snap);
         let p = pitch_of(pos.y).ceil() as i32;
         state.begin_edit(pat);
-        let id = pat.add_note(p, st.max(0) as usize, state.last_note_len.max(1).min(total_steps as usize), state.last_velocity);
+        let id = pat.add_note(p, st.max(0.0), state.last_note_len.max(1.0), state.last_velocity);
         if !shift {
             state.selection.clear();
         }
@@ -916,9 +916,9 @@ pub fn show(
             match zone {
                 NoteZone::Left | NoteZone::Right => {
                     let edge = if *zone == NoteZone::Left { Edge::Left } else { Edge::Right };
-                    let orig: Vec<(usize, usize)> = group_ids
+                    let orig: Vec<(f64, f64)> = group_ids
                         .iter()
-                        .map(|iid| pat.notes.iter().find(|n| n.id == *iid).map(|n| (n.start_step, n.length_steps)).unwrap_or((0, 1)))
+                        .map(|iid| pat.notes.iter().find(|n| n.id == *iid).map(|n| (n.start_step, n.length_steps)).unwrap_or((0.0, 1.0)))
                         .collect();
                     state.drag = Some(Drag::NoteResize { ids: group_ids, orig, edge, hit_id: *nid });
                 }
@@ -945,9 +945,9 @@ pub fn show(
                     if ids.is_empty() {
                         ids.push(*nid);
                     }
-                    let orig: Vec<(i32, usize)> = ids
+                    let orig: Vec<(i32, f64)> = ids
                         .iter()
-                        .map(|iid| pat.notes.iter().find(|x| x.id == *iid).map(|n| (n.pitch_index, n.start_step)).unwrap_or((0, 0)))
+                        .map(|iid| pat.notes.iter().find(|x| x.id == *iid).map(|n| (n.pitch_index, n.start_step)).unwrap_or((0, 0.0)))
                         .collect();
                     let hit_id = ids.first().copied().unwrap_or(*nid);
                     let last_pitch = pat.notes.iter().find(|x| x.id == hit_id).map(|n| n.pitch_index);
@@ -960,17 +960,17 @@ pub fn show(
         if resp.dragged()
             && let Some(delta) = resp.total_drag_delta()
         {
-            let mut resize_len_after: Option<usize> = None;
+            let mut resize_len_after: Option<f64> = None;
             match &mut state.drag {
                 Some(Drag::NoteMove { ids, orig, hit_id, last_pitch }) => {
                     let d_pitch = (-delta.y / ROW_H).round() as i32;
-                    let d_step = snap_to((delta.x / step_px).round() as i32, snap);
+                    let d_step = snap_to((delta.x / step_px).round() as f64, snap);
                     let new_pitch = {
                         let notes_list = &mut pat.notes;
                         for (id, (op, os)) in ids.iter().zip(orig.iter()) {
                             if let Some(n) = notes_list.iter_mut().find(|n| &n.id == id) {
                                 n.pitch_index = pitch_clamp(*op + d_pitch);
-                                n.start_step = ((*os as i32 + d_step).clamp(0, total_steps - 1)) as usize;
+                                n.start_step = (*os + d_step).max(0.0); // notes may exceed the clip length
                             }
                         }
                         notes_list.iter().find(|n| n.id == *hit_id).map(|n| n.pitch_index)
@@ -983,19 +983,18 @@ pub fn show(
                     }
                 }
                 Some(Drag::NoteResize { ids, orig, edge, hit_id }) => {
-                    let d = snap_to((delta.x / step_px).round() as i32, snap);
+                    let d = snap_to((delta.x / step_px).round() as f64, snap);
                     let notes_list = &mut pat.notes;
                     for (id, (os, ol)) in ids.iter().zip(orig.iter()) {
                         if let Some(n) = notes_list.iter_mut().find(|n| &n.id == id) {
                             match edge {
                                 Edge::Right => {
-                                    n.length_steps = ((*ol as i32) + d).clamp(1, total_steps - *os as i32) as usize;
+                                    n.length_steps = (*ol + d).max(1.0);
                                 }
                                 Edge::Left => {
-                                    let ns = ((*os as i32) + d)
-                                        .clamp(0, (*os as i32 + *ol as i32 - 1).min(total_steps - 1));
-                                    n.start_step = ns as usize;
-                                    n.length_steps = ((*os + *ol) as i32 - ns).max(1) as usize;
+                                    let ns = (*os + d).clamp(0.0, *os + *ol - 1.0);
+                                    n.start_step = ns;
+                                    n.length_steps = (*os + *ol - ns).max(1.0);
                                 }
                             }
                         }
@@ -1073,7 +1072,7 @@ pub fn show(
     if (lresp.clicked() || lresp.dragged())
         && let Some(pos) = lresp.interact_pointer_pos()
     {
-        let st = step_floor(pos.x).clamp(0, total_steps - 1);
+        let st = snap_to(step_at(pos.x), snap);
         let vel = ((grid_bottom - 2.0 - pos.y) / lane_h).clamp(0.0, 1.0);
         if lresp.drag_started() {
             state.begin_edit(pat);
@@ -1081,14 +1080,14 @@ pub fn show(
         let mut changed = false;
         if state.selection.is_empty() {
             for n in pat.notes.iter_mut() {
-                if n.start_step == st as usize {
+                if n.start_step == st {
                     n.velocity = vel;
                     changed = true;
                 }
             }
         } else {
             for n in pat.notes.iter_mut() {
-                if n.start_step == st as usize && state.selection.contains(&n.id) {
+                if n.start_step == st && state.selection.contains(&n.id) {
                     n.velocity = vel;
                     changed = true;
                 }
