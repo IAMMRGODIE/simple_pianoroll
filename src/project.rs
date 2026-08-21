@@ -37,6 +37,13 @@ pub struct Project {
     /// Whether the loaded sample plays once (no loop).
     #[serde(default)]
     pub sample_one_shot: bool,
+    /// Note row height in pixels.
+    #[serde(default = "default_row_h")]
+    pub row_h: f32,
+}
+
+fn default_row_h() -> f32 {
+    13.0
 }
 
 /// Pretty-print the project as a JSON string.

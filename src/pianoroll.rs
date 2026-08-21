@@ -96,6 +96,8 @@ pub struct EditorState {
     /// User-editable palette for the Custom color scheme (RGB per degree).
     pub custom_colors: Vec<[u8; 3]>,
     pub snap: f64,
+    /// Note row height in pixels (vertical size of one pitch row).
+    pub row_h: f32,
     /// Height of the velocity lane (resizable by dragging its top edge).
     pub vel_lane_h: f32,
     /// User-configurable base note names (space/comma separated), fed to the auto-namer.
@@ -129,6 +131,7 @@ impl Default for EditorState {
             tonic: 0,
             custom_colors: rainbow_palette(12),
             snap: 1.0,
+            row_h: ROW_H,
             vel_lane_h: VEL_LANE_H,
             names: "C C# D D# E F F# G G# A A# B".to_string(),
             clips: Vec::new(),
@@ -391,6 +394,7 @@ pub fn show(
 ) {
     let total_steps = pat.total_steps.max(1) as f64;
     let snap = state.snap;
+    let row_h = state.row_h.clamp(6.0, 40.0);
 
     let size = ui.available_size();
     let (bg, painter) = ui.allocate_painter(size, Sense::hover());
@@ -401,7 +405,7 @@ pub fn show(
     let height = bg.rect.height();
     let grid_bottom = origin.y + height;
     let rows_bottom = grid_bottom - state.vel_lane_h; // note area stops above the velocity lane
-    let rows_visible = ((height - TOP_H) / ROW_H).ceil().max(0.0) as i32;
+    let rows_visible = ((height - TOP_H) / row_h).ceil().max(0.0) as i32;
     // Minimum zoom: the whole pattern plus 1/4 extra must fit the grid width
     // (dynamic, so it follows the panel size / clip length).
     let min_step_px = (width - KEY_W) / (total_steps as f32 * 1.25);
@@ -470,8 +474,8 @@ pub fn show(
 
     let x_of = |s: f32| ui_left + (s - view_left) * step_px;
     let step_at = |x: f32| (view_left + (x - ui_left) / step_px) as f64;
-    let y_of = |p: f32| ui_top + (view_top - p) * ROW_H;
-    let pitch_of = |y: f32| view_top - (y - ui_top) / ROW_H;
+    let y_of = |p: f32| ui_top + (view_top - p) * row_h;
+    let pitch_of = |y: f32| view_top - (y - ui_top) / row_h;
     let top_pitch = view_top.ceil() as i32;
     let first_vis_step = (step_at(ui_left).floor() as i32).max(-1);
     let last_vis_step = (step_at(ui_left + width).ceil() as i32).min(total_steps as i32) + 1;
@@ -479,7 +483,7 @@ pub fn show(
     // ---- background rows ----
     for p in (top_pitch - rows_visible - 1..=top_pitch + 1).rev() {
         let y = y_of(p as f32);
-        if y > rows_bottom || y + ROW_H < ui_top {
+        if y > rows_bottom || y + row_h < ui_top {
             continue;
         }
         let row_color = if (p - state.tonic).rem_euclid(spo) == 0 {
@@ -490,7 +494,7 @@ pub fn show(
             Color32::from_rgb(26, 27, 31)
         };
         painter.rect_filled(
-            Rect::from_min_max(Pos2::new(ui_left, y), Pos2::new(ui_left + width - KEY_W, y + ROW_H)),
+            Rect::from_min_max(Pos2::new(ui_left, y), Pos2::new(ui_left + width - KEY_W, y + row_h)),
             0.0,
             row_color,
         );
@@ -554,12 +558,12 @@ pub fn show(
     );
     for p in (top_pitch - rows_visible - 1..=top_pitch + 1).rev() {
         let y = y_of(p as f32);
-        if y > grid_bottom || y + ROW_H < ui_top {
+        if y > grid_bottom || y + row_h < ui_top {
             continue;
         }
         let label = auto_note_name(p, spo, &state.names);
         painter.text(
-            Pos2::new(ui_left - 4.0, y + ROW_H * 0.5),
+            Pos2::new(ui_left - 4.0, y + row_h * 0.5),
             Align2::RIGHT_CENTER,
             label,
             egui::FontId::proportional(9.0),
@@ -575,7 +579,7 @@ pub fn show(
             let x0 = x_of(n.start_step as f32);
             let y0 = y_of(n.pitch_index as f32);
             let w = (n.length_steps as f32 * step_px - 1.0).max(1.0);
-            (n.id, Rect::from_min_size(Pos2::new(x0, y0), Vec2::new(w, ROW_H - 2.0)))
+            (n.id, Rect::from_min_size(Pos2::new(x0, y0), Vec2::new(w, row_h - 2.0)))
         })
         .collect();
     let note_canvas = painter.with_clip_rect(grid_rect);
@@ -627,7 +631,7 @@ pub fn show(
         let s1 = (*start_step).max(*cur_step);
         let preview_rect = Rect::from_min_size(
             Pos2::new(x_of(s0 as f32), y_of(*pitch as f32)),
-            Vec2::new((s1 - s0 + 1.0) as f32 * step_px - 1.0, ROW_H - 2.0),
+            Vec2::new((s1 - s0 + 1.0) as f32 * step_px - 1.0, row_h - 2.0),
         );
         note_canvas.rect_filled(preview_rect, 3.0, note_color(*pitch, state.tonic, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
     }
@@ -976,7 +980,7 @@ pub fn show(
             let mut resize_len_after: Option<f64> = None;
             match &mut state.drag {
                 Some(Drag::NoteMove { ids, orig, hit_id, last_pitch }) => {
-                    let d_pitch = (-delta.y / ROW_H).round() as i32;
+                    let d_pitch = (-delta.y / row_h).round() as i32;
                     let d_step = snap_to((delta.x / step_px).round() as f64, snap);
                     let new_pitch = {
                         let notes_list = &mut pat.notes;

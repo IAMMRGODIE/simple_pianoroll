@@ -9,6 +9,7 @@
 // #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
+mod midi;
 mod pattern;
 mod pianoroll;
 mod project;
@@ -29,6 +30,10 @@ struct PianoRollApp {
     custom_ratios_input: Vec<f32>,
     show_custom_window: bool,
     show_colors_window: bool,
+    /// Pending MIDI import (parsed file waiting for the track-selection window).
+    midi_import: Option<midi::ImportData>,
+    /// Whether imported MIDI tracks go to separate clips.
+    midi_separate: bool,
 }
 
 impl eframe::App for PianoRollApp {
@@ -225,6 +230,7 @@ impl eframe::App for PianoRollApp {
                                     self.editor.names = p.note_names;
                                     self.editor.scheme = p.scheme;
                                     self.editor.snap = p.snap;
+                                    self.editor.row_h = p.row_h;
                                     self.editor.tonic = p.tonic;
                                     self.editor.selection.clear();
                                     self.editor.begin_edit(&mut pat);
@@ -232,6 +238,18 @@ impl eframe::App for PianoRollApp {
                                 Err(e) => eprintln!("could not parse project: {e}"),
                             }
                         }
+
+                if ui.button("🎹 MIDI…").clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .add_filter("MIDI", &["mid", "midi"])
+                        .pick_file()
+                    && let Ok(bytes) = std::fs::read(&path)
+                {
+                    match midi::parse(&bytes) {
+                        Ok(data) => self.midi_import = Some(data),
+                        Err(e) => eprintln!("MIDI import failed: {e}"),
+                    }
+                }
 
                 ui.separator();
                 ui.label("Clips:");
@@ -370,6 +388,9 @@ impl eframe::App for PianoRollApp {
                     self.editor.begin_edit(&mut pat);
                     pat.beat_unit = unit;
                 }
+                ui.separator();
+                ui.label("Row h:");
+                ui.add(egui::Slider::new(&mut self.editor.row_h, 8.0..=32.0).text("px"));
                 ui.separator();
                 ui.label("Color:");
                 egui::ComboBox::from_id_salt("scheme")
@@ -618,6 +639,69 @@ impl eframe::App for PianoRollApp {
             }
         }
 
+        // ---- MIDI import: pick tracks, then apply ----
+        // Take the parsed data out of self so the window closure never needs to
+        // borrow both self.midi_import and self at the same time.
+        let mut import = self.midi_import.take();
+        if let Some(ref mut data) = import {
+            let mut open = true;
+            let mut apply = false;
+            let mut cancelled = false;
+            let mut warn = false;
+            let mut separate = self.midi_separate;
+            egui::Window::new("Import MIDI")
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    ui.label(format!(
+                        "{} track(s) · {} BPM · {} ticks/quarter",
+                        data.tracks.len(),
+                        data.tempo as i32,
+                        data.ppq
+                    ));
+                    ui.add_space(4.0);
+                    for t in data.tracks.iter_mut() {
+                        ui.checkbox(&mut t.selected, format!("{} — {} notes", t.name, t.notes.len()));
+                    }
+                    ui.add_space(4.0);
+                    if ui
+                        .checkbox(&mut separate, "Import each track to its own clip")
+                        .changed()
+                    {
+                        self.midi_separate = separate;
+                    }
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Import").clicked() {
+                            if data.tracks.iter().any(|t| t.selected) {
+                                apply = true;
+                            } else {
+                                warn = true;
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            cancelled = true;
+                        }
+                    });
+                    if warn {
+                        ui.colored_label(egui::Color32::RED, "Select at least one track");
+                    }
+                });
+            if apply {
+                let (clips, names) = midi::build_clips(data, separate);
+                self.editor.begin_edit(&mut pat);
+                self.editor.clips = clips;
+                self.editor.clip_names = names;
+                self.editor.active_clip = 0;
+                pat = self.editor.clips[0].clone();
+                self.engine_guard().set_tempo(data.tempo);
+                self.engine_guard().set_pattern(pat.clone());
+                self.editor.selection.clear();
+                // import dropped on success
+            } else if !cancelled && open {
+                self.midi_import = import; // keep for the next frame
+            }
+        }
+
         // ---- per-degree note colors (separate window) ----
         if self.show_colors_window {
             let mut open = true;
@@ -689,6 +773,7 @@ impl PianoRollApp {
             p.snap = self.editor.snap;
             p.tonic = self.editor.tonic;
             p.custom_ratios = self.custom_ratios_input.clone();
+            p.row_h = self.editor.row_h;
             // keep the live edits of the active clip before saving
             if !self.editor.clips.is_empty() {
                 let a = self.editor.active_clip;
@@ -734,6 +819,8 @@ fn main() -> eframe::Result<()> {
                 custom_ratios_input: vec![1.0, 9.0 / 8.0, 5.0 / 4.0, 3.0 / 2.0],
                 show_custom_window: false,
                 show_colors_window: false,
+                midi_import: None,
+                midi_separate: false,
             }))
         }),
     )

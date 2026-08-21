@@ -605,6 +605,7 @@ impl Engine {
             tonic: 0,
             scheme: crate::pianoroll::Scheme::ByPitchClass,
             snap: 1.0,
+            row_h: 13.0,
             clips: Vec::new(),
             clip_names: Vec::new(),
             active_clip: 0,
