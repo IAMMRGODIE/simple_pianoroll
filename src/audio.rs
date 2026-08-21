@@ -513,6 +513,11 @@ impl Engine {
     pub fn seek_to_step(&mut self, step: usize) {
         self.sample_counter = pattern::sample_of_step(step, self.sample_rate, self.tempo)
             % self.loop_samples;
+        // While playing, a manual reposition (ruler click/drag) re-anchors the
+        // stop position so Stop returns to where the playhead now sits.
+        if self.playing {
+            self.play_start_pos = self.sample_counter;
+        }
         self.stop_pending = true; // don't let notes ring across a transport jump
     }
 
@@ -545,6 +550,11 @@ impl Engine {
     /// Jump the transport back to the start of the loop.
     pub fn rewind(&mut self) {
         self.sample_counter = 0;
+        if self.playing {
+            // Same re-anchoring as scrubbing: Home while playing makes Stop
+            // return to the start as well.
+            self.play_start_pos = 0;
+        }
         self.stop_pending = true;
         self.sched_step = None;
     }

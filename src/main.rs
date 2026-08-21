@@ -6,7 +6,7 @@
 //! again to write changes back and request a repaint. That keeps the real-time
 //! audio thread from being starved by the UI.
 
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
 mod pattern;
@@ -16,7 +16,7 @@ mod tuning;
 
 use std::sync::{Arc, Mutex};
 
-use eframe::egui;
+use eframe::egui::{self, Theme};
 
 use audio::Engine;
 use pattern::Pattern;
@@ -685,7 +685,9 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "simple_pianoroll",
         options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
+            cc.egui_ctx.set_theme(Theme::Dark);
+
             let mut editor = EditorState::default();
             let initial = engine.lock().unwrap_or_else(|p| p.into_inner()).pattern().clone();
             editor.clips = vec![initial.clone()];
