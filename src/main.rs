@@ -39,19 +39,19 @@ impl eframe::App for PianoRollApp {
 
         // Space toggles play/pause (brief lock).
         if !typing && ui.input(|i| i.key_pressed(egui::Key::Space)) {
-            let mut e = self.engine.lock().unwrap();
+            let mut e = self.engine_guard();
             let p = !e.playing();
             e.set_playing(p);
         }
         // Home / W: rewind the transport to the start.
         if !typing && ui.input(|i| i.key_pressed(egui::Key::Home)) {
-            self.engine.lock().unwrap().rewind();
+            self.engine_guard().rewind();
         }
 
         // Snapshot engine state (brief locks), then the rest runs lock-free.
-        let mut pat = self.engine.lock().unwrap().pattern().clone();
-        let spo = self.engine.lock().unwrap().tuning_steps();
-        let ph = self.engine.lock().unwrap().playhead_step();
+        let mut pat = self.engine_guard().pattern().clone();
+        let spo = self.engine_guard().tuning_steps();
+        let ph = self.engine_guard().playhead_step();
 
         // ---- keyboard shortcuts (work on the local pattern + editor) ----
         if !typing {
@@ -122,7 +122,7 @@ impl eframe::App for PianoRollApp {
                 ui.heading("simple_pianoroll");
                 ui.separator();
 
-                let mut kind = self.engine.lock().unwrap().tuning_kind();
+                let mut kind = self.engine_guard().tuning_kind();
                 let mut kind_changed = false;
                 egui::ComboBox::from_label("Tuning")
                     .selected_text(kind.label())
@@ -136,7 +136,7 @@ impl eframe::App for PianoRollApp {
                         }
                     });
                 if kind_changed {
-                    self.engine.lock().unwrap().set_tuning(kind);
+                    self.engine_guard().set_tuning(kind);
                     let n = if kind == TuningKind::Custom {
                         self.custom_ratios_input.len().max(1)
                     } else {
@@ -148,33 +148,33 @@ impl eframe::App for PianoRollApp {
                     self.show_custom_window = true;
                 }
 
-                let mut tempo = self.engine.lock().unwrap().tempo();
+                let mut tempo = self.engine_guard().tempo();
                 if ui
                     .add(egui::Slider::new(&mut tempo, 40.0..=240.0).text("BPM"))
                     .changed()
                 {
-                    self.engine.lock().unwrap().set_tempo(tempo);
+                    self.engine_guard().set_tempo(tempo);
                 }
-                let playing = self.engine.lock().unwrap().playing();
+                let playing = self.engine_guard().playing();
                 let lbl = if playing { "⏸ Pause" } else { "▶ Play" };
                 if ui.button(lbl).clicked() {
-                    let mut e = self.engine.lock().unwrap();
+                    let mut e = self.engine_guard();
                     e.set_playing(!playing);
                 }
                 if ui.button("⏮ Stop & Home").clicked() {
-                    let mut e = self.engine.lock().unwrap();
+                    let mut e = self.engine_guard();
                     e.set_playing(false);
                     e.rewind();
                 }
 
                 ui.separator();
-                let mut met = self.engine.lock().unwrap().metronome();
+                let mut met = self.engine_guard().metronome();
                 if ui.checkbox(&mut met, "Metronome").changed() {
-                    self.engine.lock().unwrap().set_metronome(met);
+                    self.engine_guard().set_metronome(met);
                 }
-                let mut mvol = self.engine.lock().unwrap().metronome_volume();
+                let mut mvol = self.engine_guard().metronome_volume();
                 if ui.add(egui::Slider::new(&mut mvol, 0.0..=1.0).text("Met vol")).changed() {
-                    self.engine.lock().unwrap().set_metronome_volume(mvol);
+                    self.engine_guard().set_metronome_volume(mvol);
                 }
 
                 ui.separator();
@@ -203,7 +203,7 @@ impl eframe::App for PianoRollApp {
                                     // import into the engine, then sync the local
                                     // snapshot so the frame-end write-back doesn't
                                     // immediately revert the loaded pattern.
-                                    let mut e = self.engine.lock().unwrap();
+                                    let mut e = self.engine_guard();
                                     e.import_project(&p);
                                     pat = e.pattern().clone();
                                     drop(e);
@@ -214,14 +214,14 @@ impl eframe::App for PianoRollApp {
                                         if let Some(c) = self.editor.clips.get(self.editor.active_clip) {
                                             pat = c.clone();
                                         }
-                                        self.engine.lock().unwrap().set_pattern(pat.clone());
+                                        self.engine_guard().set_pattern(pat.clone());
                                     } else {
                                         self.editor.clips = vec![pat.clone()];
                                         self.editor.clip_names = vec!["Clip 0".to_string()];
                                         self.editor.active_clip = 0;
                                     }
                                     self.custom_ratios_input = p.custom_ratios.clone();
-                                    self.engine.lock().unwrap().set_custom_ratios(p.custom_ratios.clone());
+                                    self.engine_guard().set_custom_ratios(p.custom_ratios.clone());
                                     self.editor.names = p.note_names;
                                     self.editor.scheme = p.scheme;
                                     self.editor.snap = p.snap;
@@ -260,7 +260,7 @@ impl eframe::App for PianoRollApp {
                                 if let Some(c) = self.editor.clips.get(idx) {
                                     pat = c.clone();
                                 }
-                                self.engine.lock().unwrap().set_pattern(pat.clone());
+                                self.engine_guard().set_pattern(pat.clone());
                                 self.editor.selection.clear();
                                 let mut p2 = pat.clone();
                                 self.editor.begin_edit(&mut p2);
@@ -287,7 +287,7 @@ impl eframe::App for PianoRollApp {
                     self.editor.clip_names.push(format!("Clip {new_idx}"));
                     self.editor.active_clip = new_idx;
                     pat = self.editor.clips[new_idx].clone();
-                    self.engine.lock().unwrap().set_pattern(pat.clone());
+                    self.engine_guard().set_pattern(pat.clone());
                     self.editor.selection.clear();
                     let mut p2 = pat.clone();
                     self.editor.begin_edit(&mut p2);
@@ -306,7 +306,7 @@ impl eframe::App for PianoRollApp {
                     if let Some(c) = self.editor.clips.get(self.editor.active_clip) {
                         pat = c.clone();
                     }
-                    self.engine.lock().unwrap().set_pattern(pat.clone());
+                    self.engine_guard().set_pattern(pat.clone());
                     self.editor.selection.clear();
                     let mut p2 = pat.clone();
                     self.editor.begin_edit(&mut p2);
@@ -355,7 +355,7 @@ impl eframe::App for PianoRollApp {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label("Root:");
-                    let spo = self.engine.lock().unwrap().tuning_steps().max(1);
+                    let spo = self.engine_guard().tuning_steps().max(1);
                     let mut root = self.editor.tonic;
                     if ui
                         .add(egui::DragValue::new(&mut root).range(0..=spo - 1).speed(1))
@@ -377,7 +377,7 @@ impl eframe::App for PianoRollApp {
                     self.editor.names = nnames;
                 }
                 if ui.button("Reset").clicked() {
-                    let spo = self.engine.lock().unwrap().tuning_steps();
+                    let spo = self.engine_guard().tuning_steps();
                     self.editor.names = pianoroll::default_names(spo as usize);
                 }
 
@@ -451,7 +451,7 @@ impl eframe::App for PianoRollApp {
                 audio::Waveform::Saw => "Saw",
                 audio::Waveform::Square => "Square",
             };
-            let mut tb = self.engine.lock().unwrap().timbre();
+            let mut tb = self.engine_guard().timbre();
             let tb_orig = tb;
 
             egui::ComboBox::from_label("Wave")
@@ -473,39 +473,39 @@ impl eframe::App for PianoRollApp {
             ui.add(egui::Slider::new(&mut tb.release, 1.0..=2000.0).text("Release"));
             ui.add(egui::Slider::new(&mut tb.gain, 0.0..=2.0).text("Gain"));
             if tb != tb_orig {
-                self.engine.lock().unwrap().set_timbre(tb);
+                self.engine_guard().set_timbre(tb);
             }
 
             // sample source (user-loaded timbre via the resampler)
             ui.separator();
-            if self.engine.lock().unwrap().using_sample() {
+            if self.engine_guard().using_sample() {
                 ui.label("Source: loaded sample");
-                if let Some(p) = self.engine.lock().unwrap().sample_path() {
+                if let Some(p) = self.engine_guard().sample_path() {
                     let name = p.file_name().and_then(|x| x.to_str()).unwrap_or("sample").to_string();
                     ui.label(name);
                 }
                 if ui.button("Use generated wave").clicked() {
-                    self.engine.lock().unwrap().use_wave();
+                    self.engine_guard().use_wave();
                 }
-                let mut one = self.engine.lock().unwrap().sample_one_shot();
+                let mut one = self.engine_guard().sample_one_shot();
                 if ui.checkbox(&mut one, "One shot").on_hover_text("Play the sample once; do not loop it").changed() {
-                    self.engine.lock().unwrap().set_sample_one_shot(one);
+                    self.engine_guard().set_sample_one_shot(one);
                 }
             } else if ui.button("Load sample…").clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .add_filter("Audio", &["wav", "flac", "mp3", "ogg"])
                     .pick_file()
                 {
-                    self.engine.lock().unwrap().load_sample(&path);
+                    self.engine_guard().load_sample(&path);
                 }
 
             ui.separator();
             ui.heading("Effects");
-            let count = self.engine.lock().unwrap().effect_count();
+            let count = self.engine_guard().effect_count();
             for i in 0..count {
-                let name = self.engine.lock().unwrap().effect_name(i).to_string();
-                let mut on = self.engine.lock().unwrap().effect_on(i);
-                let mut mix = self.engine.lock().unwrap().effect_mix(i);
+                let name = self.engine_guard().effect_name(i).to_string();
+                let mut on = self.engine_guard().effect_on(i);
+                let mut mix = self.engine_guard().effect_mix(i);
                 let on0 = on;
                 let mix0 = mix;
                 ui.horizontal(|ui| {
@@ -513,10 +513,10 @@ impl eframe::App for PianoRollApp {
                     ui.add_enabled(on, egui::Slider::new(&mut mix, 0.0..=1.0).text("mix"));
                 });
                 if on != on0 {
-                    self.engine.lock().unwrap().set_effect_on(i, on);
+                    self.engine_guard().set_effect_on(i, on);
                 }
                 if mix != mix0 {
-                    self.engine.lock().unwrap().set_effect_mix(i, mix);
+                    self.engine_guard().set_effect_mix(i, mix);
                 }
             }
         });
@@ -525,10 +525,10 @@ impl eframe::App for PianoRollApp {
         let mut preview_out: Vec<i32> = Vec::new();
         let mut seek_out: Option<usize> = None;
         egui::CentralPanel::default().show(ui, |ui| {
-            let tempo = self.engine.lock().unwrap().tempo();
+            let tempo = self.engine_guard().tempo();
             ui.label(format!(
                 "{} · {} rows/octave · BPM {:.0} · {} notes · {} selected",
-                self.engine.lock().unwrap().tuning_kind().label(),
+                self.engine_guard().tuning_kind().label(),
                 spo,
                 tempo,
                 pat.notes.len(),
@@ -569,11 +569,8 @@ impl eframe::App for PianoRollApp {
                     });
                     ui.add_space(4.0);
                     if ui.button("Apply tuning").clicked() {
-                        self.engine
-                            .lock()
-                            .unwrap()
-                            .set_custom_ratios(self.custom_ratios_input.clone());
-                        let mut e = self.engine.lock().unwrap();
+                        self.engine_guard().set_custom_ratios(self.custom_ratios_input.clone());
+                        let mut e = self.engine_guard();
                         e.set_tuning(TuningKind::Custom);
                         let spo = e.tuning_steps() as usize;
                         drop(e);
@@ -594,7 +591,7 @@ impl eframe::App for PianoRollApp {
             egui::Window::new("Note colors — one swatch per pitch class (used by the Custom scheme)")
                 .open(&mut open)
                 .show(ui.ctx(), |ui| {
-                    let spo = self.engine.lock().unwrap().tuning_steps();
+                    let spo = self.engine_guard().tuning_steps();
                     let cap = (spo.min(24)) as usize;
                     while self.editor.custom_colors.len() < cap {
                         self.editor.custom_colors.push([140, 140, 140]);
@@ -619,7 +616,7 @@ impl eframe::App for PianoRollApp {
 
         // ---- write the edited pattern back + apply preview/seek (brief lock) ----
         {
-            let mut e = self.engine.lock().unwrap();
+            let mut e = self.engine_guard();
             if *e.pattern() != pat {
                 e.set_pattern(pat.clone());
             }
@@ -637,6 +634,12 @@ impl eframe::App for PianoRollApp {
 }
 
 impl PianoRollApp {
+    /// Lock the engine, tolerating a poisoned mutex: a transient panic on the
+    /// audio thread while holding the lock must not take the whole GUI down.
+    fn engine_guard(&self) -> std::sync::MutexGuard<'_, Engine> {
+        self.engine.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Save the project via a file dialog (also Ctrl+S).
     fn save_project(&mut self, pat: &Pattern) {
         if let Some(mut path) = rfd::FileDialog::new()
@@ -647,7 +650,7 @@ impl PianoRollApp {
             if path.extension().map(|e| e != "json").unwrap_or(true) {
                 path.set_extension("json");
             }
-            let mut p = self.engine.lock().unwrap().export_project();
+            let mut p = self.engine_guard().export_project();
             p.note_names = self.editor.names.clone();
             p.scheme = self.editor.scheme;
             p.snap = self.editor.snap;
@@ -684,7 +687,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |_cc| {
             let mut editor = EditorState::default();
-            let initial = engine.lock().unwrap().pattern().clone();
+            let initial = engine.lock().unwrap_or_else(|p| p.into_inner()).pattern().clone();
             editor.clips = vec![initial.clone()];
             editor.clip_names = vec!["Clip 0".to_string()];
             editor.active_clip = 0;

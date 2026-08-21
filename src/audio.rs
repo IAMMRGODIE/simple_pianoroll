@@ -525,7 +525,7 @@ impl Engine {
     }
 
     pub fn set_tempo(&mut self, bpm: f32) {
-        self.tempo = bpm;
+        self.tempo = bpm.max(1.0); // keep loop_samples well-defined
         self.loop_samples = pattern::loop_samples(&self.pattern, self.sample_rate, bpm);
     }
 
@@ -636,7 +636,9 @@ pub fn start(kind: TuningKind) -> (Arc<Mutex<Engine>>, Option<cpal::Stream>) {
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             let mut e = match stream_engine.lock() {
                 Ok(e) => e,
-                Err(_) => return,
+                // A poisoned lock (some earlier panic while holding it) must not
+                // silence the stream: recover the data and keep generating.
+                Err(poisoned) => poisoned.into_inner(),
             };
             for chunk in data.chunks_mut(2) {
                 if chunk.len() != 2 {

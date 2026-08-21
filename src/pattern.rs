@@ -131,12 +131,16 @@ impl Pattern {
 
 /// Samples per grid step at the given sample rate and tempo.
 pub fn samples_per_step(sample_rate: usize, tempo: f32) -> f64 {
+    // Clamp so a bad (<= 0) tempo from an imported project can never produce a
+    // zero/negative step length (which would panic on integer % / in the
+    // audio callback and poison the engine mutex).
+    let tempo = tempo.max(1.0);
     sample_rate as f64 * 60.0 / tempo as f64 / STEPS_PER_BEAT as f64
 }
 
 /// Length of one full loop in samples.
 pub fn loop_samples(pattern: &Pattern, sample_rate: usize, tempo: f32) -> usize {
-    (pattern.total_steps as f64 * samples_per_step(sample_rate, tempo)).round() as usize
+    (pattern.total_steps as f64 * samples_per_step(sample_rate, tempo)).round().max(1.0) as usize
 }
 
 /// The grid step the given absolute loop sample is on.
