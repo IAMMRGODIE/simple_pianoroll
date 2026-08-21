@@ -451,13 +451,13 @@ pub fn show(
             if wheel_alt {
                 // alt+wheel over a note adjusts velocity (handled after note rects)
             } else if wheel_shift {
-                state.view_left += (- scrolled.x - scrolled.y) * 0.10;
+                state.view_left += (- scrolled.x - scrolled.y) / state.step_px * 1.5;
             } else if wheel_ctrl {
                 let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32, min_step_px);
                 state.step_px = sp;
                 state.view_left = vl;
             } else if hp.y < ruler_pan_bottom {
-                state.view_left += (- scrolled.x - scrolled.y) * 0.10;
+                state.view_left += (- scrolled.x - scrolled.y) / state.step_px * 1.5;
             } else if hp.y < ui_top {
                 let (sp, vl) = zoom_at(state.view_left, state.step_px, hp.x, ui_left, scrolled.y, total_steps as f32, min_step_px);
                 state.step_px = sp;
