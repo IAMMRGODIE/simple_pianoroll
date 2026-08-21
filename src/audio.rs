@@ -322,7 +322,7 @@ impl Engine {
             let beat = (self.sample_counter as f64 / sps / spb).floor() as usize;
             if beat != self.last_beat {
                 self.last_beat = beat;
-                let bar = beat % self.pattern.beats_per_bar.max(1) as usize == 0;
+                let bar = beat.is_multiple_of(self.pattern.beats_per_bar.max(1) as usize);
                 self.click_t = 0.0;
                 self.click_freq = if bar { 2000.0 } else { 1000.0 };
                 self.click_gain = self.metronome_volume * if bar { 1.0 } else { 0.5 };
