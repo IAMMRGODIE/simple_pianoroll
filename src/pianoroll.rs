@@ -750,10 +750,23 @@ pub fn show(
 
     // ---- ruler response: seek / scrub ----
     let ruler_resp = ui.interact(ruler_rect, egui::Id::new("pr_ruler"), Sense::click_and_drag());
-    if (ruler_resp.clicked() || ruler_resp.dragged())
+    // Click snaps to the grid; dragging follows freely and snaps when released.
+    if ruler_resp.clicked()
+        && let Some(pos) = ruler_resp.interact_pointer_pos()
+    {
+        let st = snap_to(step_at(pos.x), snap).clamp(0.0, total_steps);
+        *seek = Some(st);
+    }
+    if ruler_resp.dragged()
         && let Some(pos) = ruler_resp.interact_pointer_pos()
     {
         let st = step_at(pos.x).clamp(0.0, total_steps);
+        *seek = Some(st);
+    }
+    if ruler_resp.drag_stopped()
+        && let Some(pos) = ruler_resp.interact_pointer_pos()
+    {
+        let st = snap_to(step_at(pos.x), snap).clamp(0.0, total_steps);
         *seek = Some(st);
     }
 

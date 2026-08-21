@@ -338,11 +338,12 @@ impl eframe::App for PianoRollApp {
                 ui.separator();
                 ui.label("Clip len:");
                 let mut tlen = pat.total_steps as i32;
-                let slide = ui.add(egui::Slider::new(&mut tlen, 8..=256).step_by(1.0).drag_value_speed(0.5).text("steps"));
+                let slide = ui.add(egui::DragValue::new(&mut tlen).suffix("steps"));
                 if slide.drag_started() {
                     self.editor.begin_edit(&mut pat);
                 }
                 if slide.changed() {
+                    tlen = tlen.max(1);
                     pat.set_len(tlen as usize);
                 }
                 ui.separator();
