@@ -995,7 +995,7 @@ pub fn show(
             match &mut state.drag {
                 Some(Drag::NoteMove { ids, orig, hit_id, last_pitch }) => {
                     let d_pitch = (-delta.y / row_h).round() as i32;
-                    let d_step = snap_to((delta.x / step_px).round() as f64, eff_snap);
+                    let d_step = snap_to((delta.x / step_px) as f64, eff_snap);
                     let new_pitch = {
                         let notes_list = &mut pat.notes;
                         for (id, (op, os)) in ids.iter().zip(orig.iter()) {
@@ -1014,7 +1014,7 @@ pub fn show(
                     }
                 }
                 Some(Drag::NoteResize { ids, orig, edge, hit_id }) => {
-                    let d = snap_to((delta.x / step_px).round() as f64, eff_snap);
+                    let d = snap_to((delta.x / step_px) as f64, eff_snap);
                     let notes_list = &mut pat.notes;
                     for (id, (os, ol)) in ids.iter().zip(orig.iter()) {
                         if let Some(n) = notes_list.iter_mut().find(|n| &n.id == id) {
