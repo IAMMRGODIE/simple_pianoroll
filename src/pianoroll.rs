@@ -440,6 +440,10 @@ pub fn show(
     let shift = ui.input(|i| i.modifiers.shift);
     let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
     let alt = ui.input(|i| i.modifiers.alt);
+    // Alt disables snapping while dragging/resizing notes (free movement).
+    let snap_active = !alt;
+    let eff_snap = if snap_active { snap } else { 0.0 };
+    let grid_snap = snap_active && snap.fract() == 0.0;
 
     // Wheel, in priority order:
     //  - shift (on the wheel) -> pan horizontally (ctrl is ignored when shift is held)
@@ -641,7 +645,7 @@ pub fn show(
         let s1 = (*start_step).max(*cur_step);
         let preview_rect = Rect::from_min_size(
             Pos2::new(x_of(s0 as f32), y_of(*pitch as f32)),
-            Vec2::new((s1 - s0 + 1.0) as f32 * step_px - 1.0, row_h - 2.0),
+            Vec2::new(((s1 - s0 + if grid_snap { 1.0 } else { 0.0 }) as f32) * step_px - 1.0, row_h - 2.0),
         );
         note_canvas.rect_filled(preview_rect, 3.0, note_color(*pitch, state.tonic, spo, state.scheme, &state.custom_colors).gamma_multiply(0.5));
     }
@@ -802,8 +806,8 @@ pub fn show(
             state.begin_edit(pat);
             state.drag = Some(Drag::Draw {
                 pitch: pitch_clamp(cell.0),
-                start_step: (snap_to(cell.1, snap)).max(0.0),
-                cur_step: (snap_to(cell.1, snap)).max(0.0),
+                start_step: (snap_to(cell.1, eff_snap)).max(0.0),
+                cur_step: (snap_to(cell.1, eff_snap)).max(0.0),
             });
         }
     }
@@ -812,7 +816,7 @@ pub fn show(
     {
         match &mut state.drag {
             Some(Drag::Draw { start_step, cur_step, .. }) => {
-                let ns = snap_to(step_at(pos.x), snap).max(0.0);
+                let ns = snap_to(step_at(pos.x), eff_snap).max(0.0);
                 *cur_step = ns;
                 *start_step = (*start_step).min(ns);
             }
@@ -827,7 +831,7 @@ pub fn show(
             Some(Drag::Draw { pitch, start_step, cur_step, .. }) => {
                 let s0 = start_step.min(cur_step);
                 let s1 = start_step.max(cur_step);
-                let len = (s1 - s0 + 1.0).max(1.0);
+                let len = (s1 - s0 + if grid_snap { 1.0 } else { 0.0 }).max(crate::pattern::MIN_NOTE_LEN);
                 let id = pat.add_note(pitch, s0, len, state.last_velocity);
                 state.last_note_len = len;
                 state.selection.clear();
@@ -857,7 +861,7 @@ pub fn show(
         let st = snap_to(step_at(pos.x), snap);
         let p = pitch_of(pos.y).ceil() as i32;
         state.begin_edit(pat);
-        let id = pat.add_note(p, st.max(0.0), state.last_note_len.max(1.0), state.last_velocity);
+        let id = pat.add_note(p, st.max(0.0), state.last_note_len.max(crate::pattern::MIN_NOTE_LEN), state.last_velocity);
         if !shift {
             state.selection.clear();
         }
@@ -991,7 +995,7 @@ pub fn show(
             match &mut state.drag {
                 Some(Drag::NoteMove { ids, orig, hit_id, last_pitch }) => {
                     let d_pitch = (-delta.y / row_h).round() as i32;
-                    let d_step = snap_to((delta.x / step_px).round() as f64, snap);
+                    let d_step = snap_to((delta.x / step_px).round() as f64, eff_snap);
                     let new_pitch = {
                         let notes_list = &mut pat.notes;
                         for (id, (op, os)) in ids.iter().zip(orig.iter()) {
@@ -1010,18 +1014,19 @@ pub fn show(
                     }
                 }
                 Some(Drag::NoteResize { ids, orig, edge, hit_id }) => {
-                    let d = snap_to((delta.x / step_px).round() as f64, snap);
+                    let d = snap_to((delta.x / step_px).round() as f64, eff_snap);
                     let notes_list = &mut pat.notes;
                     for (id, (os, ol)) in ids.iter().zip(orig.iter()) {
                         if let Some(n) = notes_list.iter_mut().find(|n| &n.id == id) {
                             match edge {
                                 Edge::Right => {
-                                    n.length_steps = (*ol + d).max(1.0);
+                                    n.length_steps = (*ol + d).max(crate::pattern::MIN_NOTE_LEN);
                                 }
                                 Edge::Left => {
-                                    let ns = (*os + d).clamp(0.0, *os + *ol - 1.0);
+                                    let hi = (*os + *ol - crate::pattern::MIN_NOTE_LEN).max(0.0);
+                                    let ns = (*os + d).clamp(0.0, hi);
                                     n.start_step = ns;
-                                    n.length_steps = (*os + *ol - ns).max(1.0);
+                                    n.length_steps = (*os + *ol - ns).max(crate::pattern::MIN_NOTE_LEN);
                                 }
                             }
                         }

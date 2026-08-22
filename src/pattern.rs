@@ -14,6 +14,9 @@ use crate::tuning::REF_NOTE;
 pub const STEPS_PER_BEAT: usize = 4;
 /// Default tempo when nothing is loaded.
 pub const DEFAULT_TEMPO: f32 = 120.0;
+/// Minimum note length (in steps). Sub-step notes are allowed (tuplets, free
+/// drags), so the floor is only there to keep notes from vanishing entirely.
+pub const MIN_NOTE_LEN: f64 = 0.05;
 
 /// A note in the pattern. `pitch_index` is our uniform EDO degree
 /// (0 == reference C4); times are in grid *steps* (fractional for tuplets).
@@ -116,7 +119,7 @@ impl Pattern {
             id,
             pitch_index,
             start_step,
-            length_steps: length_steps.max(1.0),
+            length_steps: length_steps.max(MIN_NOTE_LEN),
             velocity,
             label: String::new(),
         });
@@ -136,7 +139,7 @@ impl Pattern {
         let mut clone = src.clone();
         clone.id = id;
         clone.start_step = start_step;
-        clone.length_steps = length_steps.max(1.0);
+        clone.length_steps = length_steps.max(MIN_NOTE_LEN);
         self.notes.push(clone);
         id
     }
