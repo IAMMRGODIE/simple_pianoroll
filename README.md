@@ -22,10 +22,26 @@
 需要 Rust 工具链（edition 2024）。
 
 ```bash
-cargo run              # 调试构建并运行
+cargo run              # 调试构建并运行（桌面端）
 cargo run --release    # 发布构建（更流畅）
 cargo clippy --all-targets   # 代码检查
 ```
+
+### Web 端（wasm32 / trunk）
+
+程序也可以编译到浏览器运行（音频走 Web Audio API，即 cpal 的 wasm 后端）：
+
+```bash
+rustup target add wasm32-unknown-unknown   # 首次需要
+trunk serve                                # 开发预览: http://localhost:8080
+trunk build --release                      # 产出 dist/ 静态站点
+```
+
+注意：
+
+- 浏览器自动播放策略要求用户交互后才能出声：**第一次点击或按空格后音频才恢复**。
+- 文件对话框（保存/打开/MIDI/加载采样）目前仅桌面端可用，Web 端对应按钮为禁用占位。
+- `dist/` 目录可直接用任意静态服务器托管。
 
 ### 目录结构
 

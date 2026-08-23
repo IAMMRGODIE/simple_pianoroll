@@ -589,6 +589,7 @@ impl Engine {
     }
     // ---- project save/load ----
     /// Snapshot the current project state.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub fn export_project(&self) -> crate::project::Project {
         crate::project::Project {
             pattern: self.pattern.clone(),
@@ -615,6 +616,7 @@ impl Engine {
     }
 
     /// Apply a loaded project's engine state (pattern, tempo, tuning, timbre, effects).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub fn import_project(&mut self, p: &crate::project::Project) {
         self.set_pattern(p.pattern.clone());
         self.set_tempo(p.tempo);
@@ -633,8 +635,9 @@ impl Engine {
 
 }
 
-/// Open the default output device and start streaming. Returns the shared
-/// engine handle plus the live stream (which must be kept alive).
+/// Desktop: open the default output device and start streaming. Returns the
+/// shared engine handle plus the live stream (which must be kept alive).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn start(kind: TuningKind) -> (Arc<Mutex<Engine>>, Option<cpal::Stream>) {
     let built = (|| -> anyhow::Result<(Arc<Mutex<Engine>>, cpal::Stream)> {
     let host = cpal::default_host();
@@ -678,4 +681,75 @@ pub fn start(kind: TuningKind) -> (Arc<Mutex<Engine>>, Option<cpal::Stream>) {
             (Arc::new(Mutex::new(Engine::new(48_000, kind))), None)
         }
     }
+}
+
+// ---- web (wasm32) audio ----
+// cpal's wasm backend drives the Web Audio API. The AudioContext starts
+// suspended until a user gesture, so we keep the stream alive here and only
+// play() it from resume_audio() (called on first click / Space).
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static WEB_STREAM: std::cell::RefCell<Option<cpal::Stream>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Web: create the engine and the Web Audio stream, but do not start it yet
+/// (autoplay policy). The stream is parked in a thread-local so it stays alive;
+/// resume_audio() starts it from a user gesture.
+#[cfg(target_arch = "wasm32")]
+pub fn start(kind: TuningKind) -> (Arc<Mutex<Engine>>, Option<cpal::Stream>) {
+    let built = (|| -> anyhow::Result<(Arc<Mutex<Engine>>, cpal::Stream)> {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .ok_or_else(|| anyhow!("no output device available"))?;
+        let config: cpal::StreamConfig = device.default_output_config()?.into();
+        let sample_rate = config.sample_rate as usize;
+
+        let engine = Arc::new(Mutex::new(Engine::new(sample_rate, kind)));
+        let stream_engine = Arc::clone(&engine);
+
+        let stream = device.build_output_stream(
+            config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let mut e = match stream_engine.lock() {
+                    Ok(e) => e,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                for chunk in data.chunks_mut(2) {
+                    if chunk.len() != 2 {
+                        break;
+                    }
+                    let out = e.next_sample();
+                    chunk[0] = out[0];
+                    chunk[1] = out[1];
+                }
+            },
+            move |err| eprintln!("audio stream error: {err}"),
+            None,
+        )?;
+        Ok((engine, stream))
+    })();
+    match built {
+        Ok((engine, stream)) => {
+            WEB_STREAM.with(|s| *s.borrow_mut() = Some(stream));
+            (engine, None)
+        }
+        Err(e) => {
+            eprintln!("WARNING: audio unavailable, running silent: {e:#}");
+            (Arc::new(Mutex::new(Engine::new(48_000, kind))), None)
+        }
+    }
+}
+
+/// Web: start/resume the parked stream (must be called from a user gesture).
+/// play() resumes the AudioContext and starts the audio callback.
+#[cfg(target_arch = "wasm32")]
+pub fn resume_audio() {
+    WEB_STREAM.with(|s| {
+        if let Some(st) = s.borrow().as_ref() {
+            let _ = st.play();
+        }
+    });
 }

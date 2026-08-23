@@ -6,7 +6,7 @@
 //! again to write changes back and request a repaint. That keeps the real-time
 //! audio thread from being starved by the UI.
 
-// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
 mod midi;
@@ -44,9 +44,17 @@ impl eframe::App for PianoRollApp {
 
         // Space toggles play/pause (brief lock).
         if !typing && ui.input(|i| i.key_pressed(egui::Key::Space)) {
+            #[cfg(target_arch = "wasm32")]
+            audio::resume_audio();
             let mut e = self.engine_guard();
             let p = !e.playing();
             e.set_playing(p);
+        }
+        // The web AudioContext starts suspended; any click is a user gesture
+        // that may resume it (cheap no-op once running).
+        #[cfg(target_arch = "wasm32")]
+        if ui.input(|i| i.pointer.any_click()) {
+            audio::resume_audio();
         }
         // Home / W: rewind the transport to the start.
         if !typing && ui.input(|i| i.key_pressed(egui::Key::Home)) {
@@ -198,6 +206,12 @@ impl eframe::App for PianoRollApp {
                 if ui.button("💾 Save").clicked() {
                     self.save_project(&pat);
                 }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    ui.add_enabled(false, egui::Button::new("📂 Open"))
+                        .on_hover_text("File dialogs are desktop-only");
+                }
+                #[cfg(not(target_arch = "wasm32"))]
                 if ui.button("📂 Open").clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .add_filter("Project", &["json"])
@@ -239,6 +253,12 @@ impl eframe::App for PianoRollApp {
                             }
                         }
 
+                #[cfg(target_arch = "wasm32")]
+                {
+                    ui.add_enabled(false, egui::Button::new("🎹 MIDI…"))
+                        .on_hover_text("File dialogs are desktop-only");
+                }
+                #[cfg(not(target_arch = "wasm32"))]
                 if ui.button("🎹 MIDI…").clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .add_filter("MIDI", &["mid", "midi"])
@@ -545,13 +565,26 @@ impl eframe::App for PianoRollApp {
                 if ui.checkbox(&mut one, "One shot").on_hover_text("Play the sample once; do not loop it").changed() {
                     self.engine_guard().set_sample_one_shot(one);
                 }
-            } else if ui.button("Load sample…").clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Audio", &["wav", "flac", "mp3", "ogg"])
-                    .pick_file()
+            } else if let Some(path) = {
+                #[cfg(target_arch = "wasm32")]
                 {
-                    self.engine_guard().load_sample(&path);
+                    ui.add_enabled(false, egui::Button::new("Load sample…"))
+                        .on_hover_text("File dialogs are desktop-only");
+                    None::<std::path::PathBuf>
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if ui.button("Load sample…").clicked() {
+                        rfd::FileDialog::new()
+                            .add_filter("Audio", &["wav", "flac", "mp3", "ogg"])
+                            .pick_file()
+                    } else {
+                        None
+                    }
+                }
+            } {
+                self.engine_guard().load_sample(&path);
+            }
 
             ui.separator();
             ui.heading("Effects");
@@ -759,6 +792,13 @@ impl PianoRollApp {
 
     /// Save the project via a file dialog (also Ctrl+S).
     fn save_project(&mut self, pat: &Pattern) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (self, pat);
+            eprintln!("file save is desktop-only for now");
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(mut path) = rfd::FileDialog::new()
             .set_file_name("project.json")
             .save_file()
@@ -796,32 +836,63 @@ impl PianoRollApp {
     }
 }
 
+/// Build the app, shared by the desktop and web entry points.
+fn make_app(
+    cc: &eframe::CreationContext<'_>,
+    engine: Arc<Mutex<Engine>>,
+) -> Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
+    cc.egui_ctx.set_theme(Theme::Dark);
+    let mut editor = EditorState::default();
+    let initial = engine.lock().unwrap_or_else(|p| p.into_inner()).pattern().clone();
+    editor.clips = vec![initial.clone()];
+    editor.clip_names = vec!["Clip 0".to_string()];
+    editor.active_clip = 0;
+    let mut seed = initial.clone();
+    editor.begin_edit(&mut seed);
+    Ok(Box::new(PianoRollApp {
+        engine,
+        editor,
+        custom_ratios_input: vec![1.0, 9.0 / 8.0, 5.0 / 4.0, 3.0 / 2.0],
+        show_custom_window: false,
+        show_colors_window: false,
+        midi_import: None,
+        midi_separate: false,
+    }))
+}
+
+/// Desktop: native window + cpal audio stream.
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
     let (engine, _stream) = audio::start(TuningKind::Equal12);
+    let options = eframe::NativeOptions {
+        // renderer: eframe::Renderer::Glow,
+        ..Default::default()
+    };
+    eframe::run_native("simple_pianoroll", options, Box::new(move |cc| make_app(cc, engine)))
+}
 
-    let options = eframe::NativeOptions::default();
-    eframe::run_native(
-        "simple_pianoroll",
-        options,
-        Box::new(move |cc| {
-            cc.egui_ctx.set_theme(Theme::Dark);
-
-            let mut editor = EditorState::default();
-            let initial = engine.lock().unwrap_or_else(|p| p.into_inner()).pattern().clone();
-            editor.clips = vec![initial.clone()];
-            editor.clip_names = vec!["Clip 0".to_string()];
-            editor.active_clip = 0;
-            let mut seed = initial.clone();
-            editor.begin_edit(&mut seed);
-            Ok(Box::new(PianoRollApp {
-                engine,
-                editor,
-                custom_ratios_input: vec![1.0, 9.0 / 8.0, 5.0 / 4.0, 3.0 / 2.0],
-                show_custom_window: false,
-                show_colors_window: false,
-                midi_import: None,
-                midi_separate: false,
-            }))
-        }),
-    )
+/// Web: run inside the browser via eframe's WebRunner. cpal's wasm backend
+/// drives Web Audio; the AudioContext starts suspended (autoplay policy), so
+/// the first user interaction resumes it (see resume_audio calls in ui()).
+#[cfg(target_arch = "wasm32")]
+fn main() -> eframe::Result<()> {
+    use wasm_bindgen::JsCast;
+    wasm_bindgen_futures::spawn_local(async move {
+        let (engine, _stream) = audio::start(TuningKind::Equal12);
+        let canvas = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id("simple_pianoroll_canvas"))
+            .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+            .expect("canvas #simple_pianoroll_canvas not found");
+        let web_options = eframe::WebOptions::default();
+        eframe::WebRunner::new()
+            .start(
+                canvas,
+                web_options,
+                Box::new(move |cc| make_app(cc, engine)),
+            )
+            .await
+            .expect("failed to start eframe");
+    });
+    Ok(())
 }

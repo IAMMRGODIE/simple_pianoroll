@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>simple_pianoroll</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #17171b; }
+    #simple_pianoroll_canvas { width: 100%; height: 100%; display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="simple_pianoroll_canvas"></canvas>
+  <script>
+    // Show a loading hint until the wasm app replaces the page content.
+    document.body.insertAdjacentHTML("beforeend", '<div id="loading" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#999;font-family:sans-serif;pointer-events:none">Loading…</div>');
+  </script>
+</body>
+</html>

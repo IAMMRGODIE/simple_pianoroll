@@ -1,6 +1,9 @@
 //! Project save/load: a serde-serializable snapshot of everything that makes up
 //! a "project" -- the pattern, transport, tuning, timbre, effects and editor
 //! display settings -- so it can be written to / read back from a JSON file.
+//!
+//! File save/load is desktop-only for now; on wasm this module is dead code.
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use serde::{Deserialize, Serialize};
 

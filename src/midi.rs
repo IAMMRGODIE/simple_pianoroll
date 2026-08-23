@@ -31,6 +31,7 @@ pub struct ImportData {
 }
 
 /// Parse an SMF file into per-track note lists.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn parse(bytes: &[u8]) -> Result<ImportData> {
     let smf = Smf::parse(bytes).map_err(|e| anyhow!("invalid MIDI file: {e}"))?;
     let ppq = match smf.header.timing {

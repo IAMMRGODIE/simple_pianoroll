@@ -969,12 +969,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
-name = "dyn-clone"
-version = "1.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
-
-[[package]]
 name = "ecolor"
 version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1079,16 +1073,6 @@ dependencies = [
  "web-time",
  "webbrowser",
  "winit",
-]
-
-[[package]]
-name = "egui_file"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "829175309461e62868cb039412e4d31b459c56a35940e473b4b51e3c0f0aa6c7"
-dependencies = [
- "dyn-clone",
- "egui",
 ]
 
 [[package]]
@@ -1419,9 +1403,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1618,16 +1604,11 @@ checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 name = "i_am_dsp"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "bimap",
  "bitvec",
  "cfg-if",
  "ciborium",
- "cpal",
  "crossbeam-channel",
- "eframe",
- "egui",
- "egui_file",
  "hound",
  "i_am_dsp_derive",
  "lazy_static",
@@ -3328,11 +3309,15 @@ dependencies = [
  "anyhow",
  "cpal",
  "eframe",
+ "getrandom 0.4.3",
  "i_am_dsp",
  "midly",
  "rfd",
  "serde",
  "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
