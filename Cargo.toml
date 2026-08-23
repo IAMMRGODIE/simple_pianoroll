@@ -19,6 +19,9 @@ midly = "0.5.3"
 futures = "0.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# cpal's Web Audio backend is gated behind its optional "wasm-bindgen" feature;
+# without it the wasm build falls back to the null host (no output device).
+cpal = { version = "0.18.2", features = ["wasm-bindgen"] }
 wasm-bindgen-futures = "0.4"
 wasm-bindgen = "0.2"
 js-sys = "0.3"
