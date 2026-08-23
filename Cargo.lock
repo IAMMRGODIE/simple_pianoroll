@@ -3311,6 +3311,7 @@ dependencies = [
  "eframe",
  "getrandom 0.4.3",
  "i_am_dsp",
+ "js-sys",
  "midly",
  "rfd",
  "serde",

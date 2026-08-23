@@ -10,6 +10,8 @@
 
 mod audio;
 mod midi;
+#[cfg(target_arch = "wasm32")]
+mod wasm_io;
 mod pattern;
 mod pianoroll;
 mod project;
@@ -38,6 +40,9 @@ struct PianoRollApp {
 
 impl eframe::App for PianoRollApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Hide the startup "Loading…" overlay once we are actually rendering.
+        #[cfg(target_arch = "wasm32")]
+        wasm_io::remove_loading();
         // If a text field (label / name / ratio editor) is focused, don't let
         // the piano-roll shortcuts trigger while the user is typing.
         let typing = ui.ctx().egui_wants_keyboard_input();
@@ -65,6 +70,29 @@ impl eframe::App for PianoRollApp {
         let mut pat = self.engine_guard().pattern().clone();
         let spo = self.engine_guard().tuning_steps();
         let ph = self.engine_guard().playhead_step();
+
+        // Web: apply files picked via the browser's upload dialogs.
+        #[cfg(target_arch = "wasm32")]
+        for ev in wasm_io::drain() {
+            match ev {
+                wasm_io::FileEvent::Project(bytes) => {
+                    if let Ok(text) = String::from_utf8(bytes)
+                        && let Ok(p) = project::from_json(&text)
+                    {
+                        self.import_project_data(p, &mut pat);
+                    }
+                }
+                wasm_io::FileEvent::Midi(bytes) => match midi::parse(&bytes) {
+                    Ok(data) => self.midi_import = Some(data),
+                    Err(e) => eprintln!("MIDI import failed: {e}"),
+                },
+                wasm_io::FileEvent::Sample(bytes) => {
+                    if let Err(e) = self.engine_guard().load_sample_bytes(bytes) {
+                        eprintln!("sample load failed: {e}");
+                    }
+                }
+            }
+        }
 
         // ---- keyboard shortcuts (work on the local pattern + editor) ----
         if !typing {
@@ -208,55 +236,27 @@ impl eframe::App for PianoRollApp {
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    ui.add_enabled(false, egui::Button::new("📂 Open"))
-                        .on_hover_text("File dialogs are desktop-only");
+                    if ui.button("📂 Open").clicked() {
+                        wasm_io::pick_file(".json,application/json", wasm_io::FileEvent::Project);
+                    }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 if ui.button("📂 Open").clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .add_filter("Project", &["json"])
                         .pick_file()
-                        && let Ok(json) = std::fs::read_to_string(&path) {
-                            match project::from_json(&json) {
-                                Ok(p) => {
-                                    // import into the engine, then sync the local
-                                    // snapshot so the frame-end write-back doesn't
-                                    // immediately revert the loaded pattern.
-                                    let mut e = self.engine_guard();
-                                    e.import_project(&p);
-                                    pat = e.pattern().clone();
-                                    drop(e);
-                                    if !p.clips.is_empty() {
-                                        self.editor.clips = p.clips.clone();
-                                        self.editor.clip_names = p.clip_names.clone();
-                                        self.editor.active_clip = p.active_clip.min(self.editor.clips.len() - 1);
-                                        if let Some(c) = self.editor.clips.get(self.editor.active_clip) {
-                                            pat = c.clone();
-                                        }
-                                        self.engine_guard().set_pattern(pat.clone());
-                                    } else {
-                                        self.editor.clips = vec![pat.clone()];
-                                        self.editor.clip_names = vec!["Clip 0".to_string()];
-                                        self.editor.active_clip = 0;
-                                    }
-                                    self.custom_ratios_input = p.custom_ratios.clone();
-                                    self.engine_guard().set_custom_ratios(p.custom_ratios.clone());
-                                    self.editor.names = p.note_names;
-                                    self.editor.scheme = p.scheme;
-                                    self.editor.snap = p.snap;
-                                    self.editor.row_h = p.row_h;
-                                    self.editor.tonic = p.tonic;
-                                    self.editor.selection.clear();
-                                    self.editor.begin_edit(&mut pat);
-                                }
-                                Err(e) => eprintln!("could not parse project: {e}"),
-                            }
+                    && let Ok(json) = std::fs::read_to_string(&path) {
+                        match project::from_json(&json) {
+                            Ok(p) => self.import_project_data(p, &mut pat),
+                            Err(e) => eprintln!("could not parse project: {e}"),
                         }
+                    }
 
                 #[cfg(target_arch = "wasm32")]
                 {
-                    ui.add_enabled(false, egui::Button::new("🎹 MIDI…"))
-                        .on_hover_text("File dialogs are desktop-only");
+                    if ui.button("🎹 MIDI…").clicked() {
+                        wasm_io::pick_file(".mid,.midi", wasm_io::FileEvent::Midi);
+                    }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 if ui.button("🎹 MIDI…").clicked()
@@ -568,8 +568,9 @@ impl eframe::App for PianoRollApp {
             } else if let Some(path) = {
                 #[cfg(target_arch = "wasm32")]
                 {
-                    ui.add_enabled(false, egui::Button::new("Load sample…"))
-                        .on_hover_text("File dialogs are desktop-only");
+                    if ui.button("Load sample…").clicked() {
+                        wasm_io::pick_file("audio/*,.wav,.flac,.mp3,.ogg", wasm_io::FileEvent::Sample);
+                    }
                     None::<std::path::PathBuf>
                 }
                 #[cfg(not(target_arch = "wasm32"))]
@@ -791,12 +792,68 @@ impl PianoRollApp {
     }
 
     /// Save the project via a file dialog (also Ctrl+S).
+    /// Build the project snapshot from the live engine + editor state.
+    fn project_snapshot(&mut self, pat: &Pattern) -> project::Project {
+        let mut p = self.engine_guard().export_project();
+        p.note_names = self.editor.names.clone();
+        p.scheme = self.editor.scheme;
+        p.snap = self.editor.snap;
+        p.tonic = self.editor.tonic;
+        p.custom_ratios = self.custom_ratios_input.clone();
+        p.row_h = self.editor.row_h;
+        // keep the live edits of the active clip before saving
+        if !self.editor.clips.is_empty() {
+            let a = self.editor.active_clip;
+            if a < self.editor.clips.len() {
+                self.editor.clips[a] = pat.clone();
+            }
+        }
+        p.clips = self.editor.clips.clone();
+        p.clip_names = self.editor.clip_names.clone();
+        p.active_clip = self.editor.active_clip;
+        p
+    }
+
+    /// Apply a parsed project to the engine + editor (shared by desktop Open
+    /// and the web upload path).
+    fn import_project_data(&mut self, p: project::Project, pat: &mut Pattern) {
+        // import into the engine, then sync the local snapshot so the frame-end
+        // write-back doesn't immediately revert the loaded pattern.
+        let mut e = self.engine_guard();
+        e.import_project(&p);
+        *pat = e.pattern().clone();
+        drop(e);
+        if !p.clips.is_empty() {
+            self.editor.clips = p.clips.clone();
+            self.editor.clip_names = p.clip_names.clone();
+            self.editor.active_clip = p.active_clip.min(self.editor.clips.len() - 1);
+            if let Some(c) = self.editor.clips.get(self.editor.active_clip) {
+                *pat = c.clone();
+            }
+            self.engine_guard().set_pattern(pat.clone());
+        } else {
+            self.editor.clips = vec![pat.clone()];
+            self.editor.clip_names = vec!["Clip 0".to_string()];
+            self.editor.active_clip = 0;
+        }
+        self.custom_ratios_input = p.custom_ratios.clone();
+        self.engine_guard().set_custom_ratios(p.custom_ratios.clone());
+        self.editor.names = p.note_names;
+        self.editor.scheme = p.scheme;
+        self.editor.snap = p.snap;
+        self.editor.row_h = p.row_h;
+        self.editor.tonic = p.tonic;
+        self.editor.selection.clear();
+        self.editor.begin_edit(pat);
+    }
+
     fn save_project(&mut self, pat: &Pattern) {
+        let json = project::to_json(&self.project_snapshot(pat));
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = (self, pat);
-            eprintln!("file save is desktop-only for now");
-            return;
+            if let Ok(json) = json {
+                wasm_io::download("project.json", json.as_bytes());
+            }
         }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(mut path) = rfd::FileDialog::new()
@@ -807,30 +864,10 @@ impl PianoRollApp {
             if path.extension().map(|e| e != "json").unwrap_or(true) {
                 path.set_extension("json");
             }
-            let mut p = self.engine_guard().export_project();
-            p.note_names = self.editor.names.clone();
-            p.scheme = self.editor.scheme;
-            p.snap = self.editor.snap;
-            p.tonic = self.editor.tonic;
-            p.custom_ratios = self.custom_ratios_input.clone();
-            p.row_h = self.editor.row_h;
-            // keep the live edits of the active clip before saving
-            if !self.editor.clips.is_empty() {
-                let a = self.editor.active_clip;
-                if a < self.editor.clips.len() {
-                    self.editor.clips[a] = pat.clone();
-                }
-            }
-            p.clips = self.editor.clips.clone();
-            p.clip_names = self.editor.clip_names.clone();
-            p.active_clip = self.editor.active_clip;
-            match project::to_json(&p) {
-                Ok(json) => {
-                    if let Err(e) = std::fs::write(&path, json) {
-                        eprintln!("save failed: {e}");
-                    }
-                }
-                Err(e) => eprintln!("could not serialize project: {e}"),
+            if let Ok(json) = json
+                && let Err(e) = std::fs::write(&path, json)
+            {
+                eprintln!("save failed: {e}");
             }
         }
     }

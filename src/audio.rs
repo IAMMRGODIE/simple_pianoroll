@@ -96,6 +96,8 @@ pub struct Engine {
     generator: Box<dyn Generator>,
     using_sample: bool,
     sample_path: Option<PathBuf>,
+    /// Uploaded sample bytes (web builds): rebuilt from memory instead of disk.
+    sample_bytes: Option<Vec<u8>>,
     /// One-shot (no loop) playback for the loaded sample.
     sample_one_shot: bool,
     sample_rate: usize,
@@ -153,9 +155,22 @@ fn build_generator(
     using_sample: bool,
     sample_path: Option<PathBuf>,
     sample_one_shot: bool,
+    sample_bytes: Option<Vec<u8>>,
 ) -> Box<dyn Generator> {
-    if using_sample
-        && let Some(path) = &sample_path {
+    if using_sample {
+        // Web path: rebuild from uploaded bytes (no disk).
+        if let Some(bytes) = &sample_bytes {
+            match decode_sample_bytes(bytes, sample_rate) {
+                Ok(pcm) => {
+                    let mut sm = Sampler::<2>::new(sample_rate);
+                    sm.one_shot = sample_one_shot;
+                    sm.set_pcm_data(pcm);
+                    return Box::new(Adsr::new(sm, tuning, sample_rate));
+                }
+                Err(e) => eprintln!("WARNING: failed to decode sample bytes: {e}"),
+            }
+        }
+        if let Some(path) = &sample_path {
             let mut sm = Sampler::<2>::new(sample_rate);
             sm.one_shot = sample_one_shot;
             let loaded = match sm.load_from_file(path) {
@@ -184,7 +199,44 @@ fn build_generator(
             }
             // fall through to the waveform if the sample failed to load
         }
+    }
     Box::new(wave_adsr(sample_rate, tuning, wave))
+}
+
+/// Decode audio bytes (via i_am_dsp's MediaSource-based loader) and resample
+/// to the engine's sample rate so the sampler plays at the right speed.
+fn decode_sample_bytes(bytes: &[u8], target_rate: usize) -> anyhow::Result<[Vec<f32>; 2]> {
+    let out = i_am_dsp::tools::pcm_data::load_from_binary::<2>(std::io::Cursor::new(bytes))?;
+    let mut pcm = out.pcm_data;
+    if out.sample_rate != target_rate {
+        resample_to(&mut pcm, out.sample_rate, target_rate);
+    }
+    Ok(pcm)
+}
+
+/// Crude linear resampling (fine for a toy sampler; keeps pitch/speed right
+/// when the uploaded file's sample rate differs from the engine's).
+fn resample_to(pcm: &mut [Vec<f32>; 2], from: usize, to: usize) {
+    if from == to || from == 0 || to == 0 {
+        return;
+    }
+    for ch in pcm.iter_mut() {
+        let old = std::mem::take(ch);
+        if old.len() <= 1 {
+            continue;
+        }
+        let new_len = ((old.len() as f64 * to as f64 / from as f64).round() as usize).max(1);
+        let step = (old.len() as f64 - 1.0) / (new_len.saturating_sub(1).max(1) as f64);
+        let mut out = Vec::with_capacity(new_len);
+        for i in 0..new_len {
+            let pos = i as f64 * step;
+            let i0 = pos.floor() as usize;
+            let i1 = (i0 + 1).min(old.len() - 1);
+            let frac = (pos - i0 as f64) as f32;
+            out.push(old[i0] * (1.0 - frac) + old[i1] * frac);
+        }
+        *ch = out;
+    }
 }
 
 impl Engine {
@@ -193,7 +245,7 @@ impl Engine {
         let tempo = pattern::DEFAULT_TEMPO;
         let loop_samples = pattern::loop_samples(&pattern, sample_rate, tempo);
         let timbre = Timbre::default();
-        let generator = build_generator(sample_rate, kind.make(), timbre.waveform, false, None, false);
+        let generator = build_generator(sample_rate, kind.make(), timbre.waveform, false, None, false, None);
         let effects: Vec<EffectSlot> = vec![
             EffectSlot {
                 name: "Lowpass",
@@ -225,6 +277,7 @@ impl Engine {
             effects,
             using_sample: false,
             sample_path: None,
+            sample_bytes: None,
             sample_one_shot: false,
             metronome: false,
             metronome_volume: 0.5,
@@ -375,6 +428,7 @@ impl Engine {
             self.using_sample,
             self.sample_path.clone(),
             self.sample_one_shot,
+            self.sample_bytes.clone(),
         );
         self.apply_timbre_params();
     }
@@ -454,9 +508,20 @@ impl Engine {
         self.rebuild_generator();
     }
 
+    /// Web builds: load a sample from uploaded bytes (decoded + resampled).
+    #[cfg(target_arch = "wasm32")]
+    pub fn load_sample_bytes(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
+        let _ = decode_sample_bytes(&bytes, self.sample_rate)?; // surface errors now
+        self.sample_bytes = Some(bytes);
+        self.using_sample = true;
+        self.rebuild_generator();
+        Ok(())
+    }
+
     /// Switch back to the selected generated waveform.
     pub fn use_wave(&mut self) {
         self.using_sample = false;
+        self.sample_bytes = None;
         self.rebuild_generator();
     }
 

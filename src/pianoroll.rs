@@ -434,6 +434,8 @@ pub fn show(
         (d, wc, ws, wa)
     });
     let (scrolled, wheel_ctrl, wheel_shift, wheel_alt) = wheel;
+
+    #[cfg(not(target_arch = "wasm32"))]
     let scrolled = scrolled * 16.0;
 
     let hover = ui.input(|i| i.pointer.hover_pos());
