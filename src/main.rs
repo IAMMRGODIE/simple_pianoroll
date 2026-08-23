@@ -515,7 +515,7 @@ impl eframe::App for PianoRollApp {
                 }
 
                 ui.separator();
-                if ui.button("ⓘ Help").on_hover_text("Mouse gestures and browser tips").clicked() {
+                if ui.button("ℹ️ Help").on_hover_text("Mouse gestures and browser tips").clicked() {
                     self.show_help_window = true;
                 }
 
@@ -814,12 +814,12 @@ impl eframe::App for PianoRollApp {
                     ui.colored_label(egui::Color32::from_rgb(255, 200, 120), "Browser tip:");
                     ui.label("Chrome/Edge show a back/forward overlay when you right-click and drag,");
                     ui.label("which fights with right-drag erasing. To turn that gesture off:");
-                    ui.label("chrome://flags/#overscroll-history-navigation  → Disabled  → relaunch.");
-                    ui.label("(Firefox: about:config → ui.context_menus.after_mouseup → false)");
+                    ui.label("chrome://flags/#overscroll-history-navigation  ➡️ Disabled  ➡️ relaunch.");
+                    ui.label("(Firefox: about:config ➡️ ui.context_menus.after_mouseup ➡️ false)");
                     ui.separator();
                     ui.label("Space: play/pause · Home: rewind · Delete: remove selected");
                     ui.label("Ctrl+A select all · Ctrl+C/X/V copy/cut/paste · Ctrl+D duplicate");
-                    ui.label("Ctrl+Z/Y undo/redo · Ctrl+S save · Ctrl/Shift+↑↓ transpose");
+                    ui.label("Ctrl+Z/Y undo/redo · Ctrl+S save · Ctrl/Shift+⬆️⬇️ transpose");
                 });
             if !open {
                 self.show_help_window = false;
