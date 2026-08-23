@@ -74,7 +74,7 @@ impl eframe::App for PianoRollApp {
         // The web AudioContext starts suspended; any click is a user gesture
         // that may resume it (cheap no-op once running).
         #[cfg(target_arch = "wasm32")]
-        if ui.input(|i| i.pointer.any_click()) {
+        if ui.input(|i| i.pointer.any_down() || i.pointer.any_click()) {
             audio::resume_audio();
         }
         // Home / W: rewind the transport to the start.

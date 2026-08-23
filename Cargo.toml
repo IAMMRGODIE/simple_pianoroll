@@ -28,5 +28,5 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 web-sys = { version = "0.3", features = [
   "Window", "Document", "Element", "HtmlCanvasElement",
   "HtmlInputElement", "FileReader", "FileList", "File",
-  "Blob", "Url", "HtmlAnchorElement", "Node", "HtmlElement",
+  "Blob", "Url", "HtmlAnchorElement", "Node", "HtmlElement", "console",
 ] }

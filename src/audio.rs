@@ -501,6 +501,8 @@ impl Engine {
     }
 
     /// Load an audio file as the track's sound source (a resampler/sampler).
+    /// (Web builds use load_sample_bytes instead.)
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub fn load_sample(&mut self, path: impl AsRef<std::path::Path>) {
         let path = path.as_ref().to_path_buf();
         self.sample_path = Some(path);
@@ -761,7 +763,8 @@ thread_local! {
 
 /// Web: create the engine and the Web Audio stream, but do not start it yet
 /// (autoplay policy). The stream is parked in a thread-local so it stays alive;
-/// resume_audio() starts it from a user gesture.
+/// resume_audio() starts it from a user gesture. Errors are logged to the
+/// browser console (eprintln is invisible on wasm).
 #[cfg(target_arch = "wasm32")]
 pub fn start(kind: TuningKind) -> (Arc<Mutex<Engine>>, Option<cpal::Stream>) {
     let built = (|| -> anyhow::Result<(Arc<Mutex<Engine>>, cpal::Stream)> {
@@ -791,18 +794,23 @@ pub fn start(kind: TuningKind) -> (Arc<Mutex<Engine>>, Option<cpal::Stream>) {
                     chunk[1] = out[1];
                 }
             },
-            move |err| eprintln!("audio stream error: {err}"),
+            move |err| {
+                web_sys::console::error_1(&format!("audio stream error: {err}").into());
+            },
             None,
         )?;
         Ok((engine, stream))
     })();
     match built {
         Ok((engine, stream)) => {
+            web_sys::console::log_1(&"web audio ready".into());
             WEB_STREAM.with(|s| *s.borrow_mut() = Some(stream));
             (engine, None)
         }
         Err(e) => {
-            eprintln!("WARNING: audio unavailable, running silent: {e:#}");
+            web_sys::console::error_1(
+                &format!("audio unavailable, running silent: {e:#}").into(),
+            );
             (Arc::new(Mutex::new(Engine::new(48_000, kind))), None)
         }
     }
@@ -813,8 +821,18 @@ pub fn start(kind: TuningKind) -> (Arc<Mutex<Engine>>, Option<cpal::Stream>) {
 #[cfg(target_arch = "wasm32")]
 pub fn resume_audio() {
     WEB_STREAM.with(|s| {
-        if let Some(st) = s.borrow().as_ref() {
-            let _ = st.play();
+        match s.borrow().as_ref() {
+            Some(st) => match st.play() {
+                Ok(()) => {
+                    web_sys::console::log_1(&"web audio resumed".into());
+                }
+                Err(e) => {
+                    web_sys::console::error_1(&format!("web audio resume failed: {e}").into());
+                }
+            },
+            None => {
+                web_sys::console::error_1(&"web audio: no stream (start failed?)".into());
+            }
         }
     });
 }
