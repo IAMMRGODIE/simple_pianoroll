@@ -817,21 +817,34 @@ pub fn start(kind: TuningKind) -> (Arc<Mutex<Engine>>, Option<cpal::Stream>) {
 }
 
 /// Web: start/resume the parked stream (must be called from a user gesture).
-/// play() resumes the AudioContext and starts the audio callback.
+/// play() resumes the AudioContext and starts the audio callback. Called on
+/// every click/down, so console logs are emitted only once.
+#[cfg(target_arch = "wasm32")]
+static AUDIO_LOG_ONCE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(target_arch = "wasm32")]
 pub fn resume_audio() {
+    use std::sync::atomic::Ordering;
+    let first = !AUDIO_LOG_ONCE.swap(true, Ordering::Relaxed);
     WEB_STREAM.with(|s| {
         match s.borrow().as_ref() {
             Some(st) => match st.play() {
                 Ok(()) => {
-                    web_sys::console::log_1(&"web audio resumed".into());
+                    if first {
+                        web_sys::console::log_1(&"web audio resumed".into());
+                    }
                 }
                 Err(e) => {
-                    web_sys::console::error_1(&format!("web audio resume failed: {e}").into());
+                    if first {
+                        web_sys::console::error_1(&format!("web audio resume failed: {e}").into());
+                    }
                 }
             },
             None => {
-                web_sys::console::error_1(&"web audio: no stream (start failed?)".into());
+                if first {
+                    web_sys::console::error_1(&"web audio: no stream (start failed?)".into());
+                }
             }
         }
     });

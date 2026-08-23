@@ -45,6 +45,7 @@ struct PianoRollApp {
     custom_ratios_input: Vec<f32>,
     show_custom_window: bool,
     show_colors_window: bool,
+    show_help_window: bool,
     /// Pending MIDI import (parsed file waiting for the track-selection window).
     midi_import: Option<midi::ImportData>,
     /// Whether imported MIDI tracks go to separate clips.
@@ -513,6 +514,11 @@ impl eframe::App for PianoRollApp {
                     self.editor.names = pianoroll::default_names(spo as usize);
                 }
 
+                ui.separator();
+                if ui.button("ⓘ Help").on_hover_text("Mouse gestures and browser tips").clicked() {
+                    self.show_help_window = true;
+                }
+
                 if !self.editor.selection.is_empty() {
                     ui.separator();
                     // velocity of the selected notes
@@ -792,6 +798,34 @@ impl eframe::App for PianoRollApp {
             }
         }
 
+        // ---- help: mouse gestures + browser tips ----
+        if self.show_help_window {
+            let mut open = true;
+            egui::Window::new("Help — mouse & browser")
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    ui.label("Left click empty grid: add a note (Shift keeps the selection).");
+                    ui.label("Left drag a note body: move it (Shift duplicates the group).");
+                    ui.label("Drag a note edge: resize. Ctrl+drag empty: marquee. Shift+drag empty: draw.");
+                    ui.label("Right-drag: erase the notes you sweep over.");
+                    ui.label("Alt+right-drag: preview the notes a vertical scan line crosses (no erasing).");
+                    ui.label("Alt+wheel: velocity. Ctrl+wheel: zoom. Shift+wheel / ruler top: pan.");
+                    ui.separator();
+                    ui.colored_label(egui::Color32::from_rgb(255, 200, 120), "Browser tip:");
+                    ui.label("Chrome/Edge show a back/forward overlay when you right-click and drag,");
+                    ui.label("which fights with right-drag erasing. To turn that gesture off:");
+                    ui.label("chrome://flags/#overscroll-history-navigation  → Disabled  → relaunch.");
+                    ui.label("(Firefox: about:config → ui.context_menus.after_mouseup → false)");
+                    ui.separator();
+                    ui.label("Space: play/pause · Home: rewind · Delete: remove selected");
+                    ui.label("Ctrl+A select all · Ctrl+C/X/V copy/cut/paste · Ctrl+D duplicate");
+                    ui.label("Ctrl+Z/Y undo/redo · Ctrl+S save · Ctrl/Shift+↑↓ transpose");
+                });
+            if !open {
+                self.show_help_window = false;
+            }
+        }
+
         // ---- per-degree note colors (separate window) ----
         if self.show_colors_window {
             let mut open = true;
@@ -960,6 +994,7 @@ fn make_app(
         custom_ratios_input: vec![1.0, 9.0 / 8.0, 5.0 / 4.0, 3.0 / 2.0],
         show_custom_window: false,
         show_colors_window: false,
+        show_help_window: false,
         midi_import: None,
         midi_separate: false,
         #[cfg(not(target_arch = "wasm32"))]
