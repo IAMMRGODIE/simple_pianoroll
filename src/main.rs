@@ -26,6 +26,19 @@ use pattern::Pattern;
 use pianoroll::EditorState;
 use tuning::TuningKind;
 
+/// Desktop-only: a file dialog + read running on a worker thread, whose result
+/// arrives through a channel (polled once per frame so the UI keeps rendering
+/// while the dialog is open).
+#[cfg(not(target_arch = "wasm32"))]
+enum PendingOp {
+    /// Project JSON text.
+    Open(std::sync::mpsc::Receiver<Option<String>>),
+    /// Raw MIDI bytes.
+    Midi(std::sync::mpsc::Receiver<Option<Vec<u8>>>),
+    /// Chosen sample path.
+    Sample(std::sync::mpsc::Receiver<Option<std::path::PathBuf>>),
+}
+
 struct PianoRollApp {
     engine: Arc<Mutex<Engine>>,
     editor: EditorState,
@@ -36,6 +49,9 @@ struct PianoRollApp {
     midi_import: Option<midi::ImportData>,
     /// Whether imported MIDI tracks go to separate clips.
     midi_separate: bool,
+    /// Desktop: in-flight async file dialog (Open/MIDI/sample).
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_op: Option<PendingOp>,
 }
 
 impl eframe::App for PianoRollApp {
@@ -70,6 +86,43 @@ impl eframe::App for PianoRollApp {
         let mut pat = self.engine_guard().pattern().clone();
         let spo = self.engine_guard().tuning_steps();
         let ph = self.engine_guard().playhead_step();
+
+        // Desktop: apply results of async file dialogs (worker thread -> channel).
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(op) = self.pending_op.take() {
+            match op {
+                PendingOp::Open(rx) => match rx.try_recv() {
+                    Ok(Some(json)) => match project::from_json(&json) {
+                        Ok(p) => self.import_project_data(p, &mut pat),
+                        Err(e) => eprintln!("could not parse project: {e}"),
+                    },
+                    Ok(None) => {} // cancelled
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        self.pending_op = Some(PendingOp::Open(rx));
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+                },
+                PendingOp::Midi(rx) => match rx.try_recv() {
+                    Ok(Some(bytes)) => match midi::parse(&bytes) {
+                        Ok(data) => self.midi_import = Some(data),
+                        Err(e) => eprintln!("MIDI import failed: {e}"),
+                    },
+                    Ok(None) => {}
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        self.pending_op = Some(PendingOp::Midi(rx));
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+                },
+                PendingOp::Sample(rx) => match rx.try_recv() {
+                    Ok(Some(path)) => self.engine_guard().load_sample(&path),
+                    Ok(None) => {}
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        self.pending_op = Some(PendingOp::Sample(rx));
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+                },
+            }
+        }
 
         // Web: apply files picked via the browser's upload dialogs.
         #[cfg(target_arch = "wasm32")]
@@ -241,16 +294,19 @@ impl eframe::App for PianoRollApp {
                     }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                if ui.button("📂 Open").clicked()
-                    && let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Project", &["json"])
-                        .pick_file()
-                    && let Ok(json) = std::fs::read_to_string(&path) {
-                        match project::from_json(&json) {
-                            Ok(p) => self.import_project_data(p, &mut pat),
-                            Err(e) => eprintln!("could not parse project: {e}"),
-                        }
-                    }
+                if ui.button("📂 Open").clicked() {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    std::thread::spawn(move || {
+                        let handle = futures::executor::block_on(
+                            rfd::AsyncFileDialog::new()
+                                .add_filter("Project", &["json"])
+                                .pick_file(),
+                        );
+                        let content = handle.and_then(|h| std::fs::read_to_string(h.path()).ok());
+                        let _ = tx.send(content);
+                    });
+                    self.pending_op = Some(PendingOp::Open(rx));
+                }
 
                 #[cfg(target_arch = "wasm32")]
                 {
@@ -259,16 +315,18 @@ impl eframe::App for PianoRollApp {
                     }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                if ui.button("🎹 MIDI…").clicked()
-                    && let Some(path) = rfd::FileDialog::new()
-                        .add_filter("MIDI", &["mid", "midi"])
-                        .pick_file()
-                    && let Ok(bytes) = std::fs::read(&path)
-                {
-                    match midi::parse(&bytes) {
-                        Ok(data) => self.midi_import = Some(data),
-                        Err(e) => eprintln!("MIDI import failed: {e}"),
-                    }
+                if ui.button("🎹 MIDI…").clicked() {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    std::thread::spawn(move || {
+                        let handle = futures::executor::block_on(
+                            rfd::AsyncFileDialog::new()
+                                .add_filter("MIDI", &["mid", "midi"])
+                                .pick_file(),
+                        );
+                        let bytes = handle.and_then(|h| std::fs::read(h.path()).ok());
+                        let _ = tx.send(bytes);
+                    });
+                    self.pending_op = Some(PendingOp::Midi(rx));
                 }
 
                 ui.separator();
@@ -565,26 +623,24 @@ impl eframe::App for PianoRollApp {
                 if ui.checkbox(&mut one, "One shot").on_hover_text("Play the sample once; do not loop it").changed() {
                     self.engine_guard().set_sample_one_shot(one);
                 }
-            } else if let Some(path) = {
+            } else {
                 #[cfg(target_arch = "wasm32")]
-                {
-                    if ui.button("Load sample…").clicked() {
-                        wasm_io::pick_file("audio/*,.wav,.flac,.mp3,.ogg", wasm_io::FileEvent::Sample);
-                    }
-                    None::<std::path::PathBuf>
+                if ui.button("Load sample…").clicked() {
+                    wasm_io::pick_file("audio/*,.wav,.flac,.mp3,.ogg", wasm_io::FileEvent::Sample);
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                {
-                    if ui.button("Load sample…").clicked() {
-                        rfd::FileDialog::new()
-                            .add_filter("Audio", &["wav", "flac", "mp3", "ogg"])
-                            .pick_file()
-                    } else {
-                        None
-                    }
+                if ui.button("Load sample…").clicked() {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    std::thread::spawn(move || {
+                        let handle = futures::executor::block_on(
+                            rfd::AsyncFileDialog::new()
+                                .add_filter("Audio", &["wav", "flac", "mp3", "ogg"])
+                                .pick_file(),
+                        );
+                        let _ = tx.send(handle.map(|h| h.path().to_path_buf()));
+                    });
+                    self.pending_op = Some(PendingOp::Sample(rx));
                 }
-            } {
-                self.engine_guard().load_sample(&path);
             }
 
             ui.separator();
@@ -856,19 +912,31 @@ impl PianoRollApp {
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(mut path) = rfd::FileDialog::new()
-            .set_file_name("project.json")
-            .save_file()
         {
-            // make sure the file gets a .json extension automatically
-            if path.extension().map(|e| e != "json").unwrap_or(true) {
-                path.set_extension("json");
-            }
-            if let Ok(json) = json
-                && let Err(e) = std::fs::write(&path, json)
-            {
-                eprintln!("save failed: {e}");
-            }
+            let json = match json {
+                Ok(j) => j,
+                Err(e) => {
+                    eprintln!("could not serialize project: {e}");
+                    return;
+                }
+            };
+            std::thread::spawn(move || {
+                let handle = futures::executor::block_on(
+                    rfd::AsyncFileDialog::new()
+                        .set_file_name("project.json")
+                        .save_file(),
+                );
+                let Some(mut path) = handle.map(|h| h.path().to_path_buf()) else {
+                    return; // cancelled
+                };
+                // make sure the file gets a .json extension automatically
+                if path.extension().map(|e| e != "json").unwrap_or(true) {
+                    path.set_extension("json");
+                }
+                if let Err(e) = std::fs::write(&path, json) {
+                    eprintln!("save failed: {e}");
+                }
+            });
         }
     }
 }
@@ -894,6 +962,8 @@ fn make_app(
         show_colors_window: false,
         midi_import: None,
         midi_separate: false,
+        #[cfg(not(target_arch = "wasm32"))]
+        pending_op: None,
     }))
 }
 

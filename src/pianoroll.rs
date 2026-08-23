@@ -438,6 +438,9 @@ pub fn show(
     #[cfg(not(target_arch = "wasm32"))]
     let scrolled = scrolled * 16.0;
 
+    #[cfg(target_arch = "wasm32")]
+    let scrolled = scrolled * 0.15;
+
     let hover = ui.input(|i| i.pointer.hover_pos());
     let shift = ui.input(|i| i.modifiers.shift);
     let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
