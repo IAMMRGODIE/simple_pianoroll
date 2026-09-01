@@ -37,6 +37,9 @@ impl ProcessContext for SeqContext {
     fn events(&self) -> &[NoteEvent] {
         &self.events
     }
+    fn clear_events(&mut self) {
+        self.events.clear()
+    }
 }
 
 /// A short tone played to preview a pitch while editing.
