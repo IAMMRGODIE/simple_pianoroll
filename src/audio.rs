@@ -323,7 +323,6 @@ impl Engine {
             for p in self.preview.iter_mut() {
                 if !p.started {
                     self.events_buf.push(NoteEvent::NoteOn {
-                        time: self.sample_counter,
                         channel: 0,
                         note: p.note,
                         velocity: 0.9,
@@ -343,7 +342,6 @@ impl Engine {
             self.preview.retain(|p| !p.started || p.remaining > 0);
             for note in expiring {
                 self.events_buf.push(NoteEvent::NoteOff {
-                    time: self.sample_counter,
                     channel: 0,
                     note,
                     velocity: 0.0,

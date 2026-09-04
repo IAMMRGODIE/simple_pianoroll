@@ -194,7 +194,6 @@ pub fn build_events(
             ev.push((
                 start,
                 NoteEvent::NoteOn {
-                    time: start,
                     channel: 0,
                     note,
                     velocity: n.velocity,
@@ -205,7 +204,6 @@ pub fn build_events(
             ev.push((
                 off,
                 NoteEvent::NoteOff {
-                    time: off,
                     channel: 0,
                     note,
                     velocity: n.velocity,
